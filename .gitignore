@@ -11,3 +11,6 @@ data/raw/
 # dur.db(20MB)는 커밋한다. Dockerfile이 COPY 하므로 저장소에 없으면 빌드가 깨진다.
 data/*.db
 !data/dur.db
+
+# OCR 모델은 저장소에 넣지 않는다. PADDLE_MODEL_DIR 로 지정한다.
+models/

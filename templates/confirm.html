@@ -15,7 +15,18 @@
     <div class="flex items-center gap-2 mb-3">
       <span class="font-medium">{{ env.label or "봉투 " ~ env.index }}</span>
       <input type="hidden" name="label{{ env.index }}" value="{{ env.label }}">
+      {% if from_photo %}
+      <span class="ml-auto text-xs text-slate-400">
+        {{ env.read }}줄 읽음 · 약 {{ env["items"]|length }}개 찾음
+      </span>
+      {% endif %}
     </div>
+    {% if from_photo and not env["items"] %}
+    <p class="text-sm text-slate-500 py-2">
+      이 사진에서는 약을 찾지 못했습니다. 더 밝은 곳에서 평평하게 펴서 다시 찍어보시거나,
+      아래에서 직접 적어주셔도 됩니다.
+    </p>
+    {% endif %}
 
     {% for item in env["items"] %}
     <div class="py-2.5 border-t first:border-t-0">
