@@ -1,0 +1,13 @@
+.env
+__pycache__/
+.venv/
+
+# 원본 수집물은 올리지 않는다. dur.db 하나로 재현 가능하다.
+data/*.csv
+data/*.json
+data/*.xlsx
+data/raw/
+
+# dur.db(20MB)는 커밋한다. Dockerfile이 COPY 하므로 저장소에 없으면 빌드가 깨진다.
+data/*.db
+!data/dur.db

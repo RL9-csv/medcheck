@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block body %}
+<form method="post" action="/result" class="space-y-5">
+  {% for s in symptoms %}<input type="hidden" name="symptom" value="{{ s }}">{% endfor %}
+
+  <div class="card p-4 bg-amber-50 border-amber-200">
+    <div class="text-sm text-amber-900">
+      이렇게 읽었습니다. <span class="font-medium">맞는지 확인하고 고쳐주세요.</span>
+      확인하신 내용만 검사합니다.
+    </div>
+  </div>
+
+  {% for env in envelopes %}
+  <div class="card p-5">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="font-medium">{{ env.label or "봉투 " ~ env.index }}</span>
+      <input type="hidden" name="label{{ env.index }}" value="{{ env.label }}">
+    </div>
+
+    {% for item in env["items"] %}
+    <div class="py-2.5 border-t first:border-t-0">
+      {% if item.status == "auto" %}
+        <label class="flex items-start gap-2.5 cursor-pointer">
+          <input type="checkbox" name="pick{{ env.index }}" value="{{ item.auto.item_seq }}" checked class="mt-1">
+          <span>
+            <span class="text-sm">{{ item.auto.product_name }}</span>
+            <span class="text-xs text-slate-400 ml-1.5">{{ item.auto.otc }}</span>
+          </span>
+        </label>
+      {% elif item.status == "suggest" %}
+        <div class="text-sm text-slate-500 mb-1.5">
+          <span class="font-mono text-slate-700">{{ item.query }}</span> — 어떤 약인지 골라주세요
+        </div>
+        {% for c in item.candidates[:4] %}
+        <label class="flex items-start gap-2.5 cursor-pointer py-1">
+          <input type="radio" name="pick{{ env.index }}_{{ loop.index0 }}" value="{{ c.item_seq }}" class="mt-1">
+          <span>
+            <span class="text-sm">{{ c.product_name }}</span>
+            <span class="text-xs text-slate-400 ml-1.5">{{ c.otc }} · {{ "%.0f"|format(c.confidence * 100) }}%</span>
+          </span>
+        </label>
+        {% endfor %}
+      {% else %}
+        <div class="text-sm text-slate-400">
+          <span class="font-mono">{{ item.query }}</span> — 목록에서 찾지 못했습니다 (검사 제외)
+        </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+
+  <button class="w-full bg-slate-900 text-white rounded-xl py-3.5 font-medium hover:bg-slate-800">
+    브리핑 만들기
+  </button>
+</form>
+
+<div class="mt-4 text-xs text-slate-400">
+  처리 시간 {% for k, v in trace.items() %}{{ k }} {{ v }}ms{% if not loop.last %} · {% endif %}{% endfor %}
+</div>
+{% endblock %}

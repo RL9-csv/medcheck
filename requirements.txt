@@ -1,0 +1,10 @@
+# 실제로 테스트를 통과한 버전으로 고정한다.
+# 범위(0.115.*)로 두었더니 로컬은 0.141이 설치되어 TemplateResponse
+# 시그니처가 달라졌다. 배포 환경에서 같은 일이 나지 않도록 못을 박는다.
+fastapi==0.141.1
+uvicorn[standard]==0.47.0
+jinja2==3.1.6
+python-multipart==0.0.29
+requests==2.32.5
+rapidfuzz==3.14.3
+pillow==12.0.0

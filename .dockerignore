@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.git/
+.env
+tests/
+src/
+data/*.json
+data/*.csv
+data/*.xlsx
+README.md
+*.md

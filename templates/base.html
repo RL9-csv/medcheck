@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}약봉투 정리{% endblock %}</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, "Pretendard", "Malgun Gothic", sans-serif; }
+  .card { background:#fff; border:1px solid #e5e7eb; border-radius:14px; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+<div class="max-w-3xl mx-auto px-5 py-8">
+  <a href="/" class="block mb-6">
+    <div class="text-lg font-semibold tracking-tight">약봉투 정리</div>
+    <div class="text-sm text-slate-500">여러 곳에서 받은 약을 한 번에 확인하고, 다음 진료에서 물어볼 것을 정리합니다</div>
+  </a>
+  {% block body %}{% endblock %}
+  <div class="mt-10 pt-5 border-t text-xs text-slate-400 leading-relaxed">
+    본 서비스는 교육·정보 제공 목적이며 진단이나 치료를 제공하지 않습니다.
+    개별 환자에 맞춤화하지 않으며 어떤 치료도 권고하지 않습니다.
+    임의로 약을 중단하거나 변경하지 마시고 의사·약사와 상담하세요.
+  </div>
+</div>
+</body>
+</html>
