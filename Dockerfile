@@ -13,9 +13,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends         libgl1 
 
 WORKDIR /app
 
-# 의존성을 먼저 복사해서 레이어 캐시를 살린다.
+# 두 파일을 한 번에 푼다. 따로 돌리면 뒤엣것이 앞의 핀을 조용히 덮는다.
+# 실제로 그랬다. requirements.txt 가 numpy==1.26.4 를 깔았는데
+# requirements-ocr.txt 를 따로 돌리자 onnxruntime 의 numpy<3.0.0 요구에
+# 맞춰 2.4.6 으로 올라갔다. 충돌이 아니라 업그레이드라 오류도 안 났다.
+# 한 번에 풀면 충돌 시 빌드가 실패해서 우리가 알게 된다.
 COPY requirements.txt requirements-ocr.txt ./
-RUN pip install --no-cache-dir -r requirements.txt     && pip install --no-cache-dir -r requirements-ocr.txt
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-ocr.txt
 
 COPY core/ core/
 COPY templates/ templates/
