@@ -28,7 +28,7 @@
     </p>
     {% endif %}
 
-    {% for item in env["items"] %}
+    {% for item in env["items"] %}{% set slot = loop.index0 %}
     <div class="py-2.5 border-t first:border-t-0">
       {% if item.status == "auto" %}
         <label class="flex items-start gap-2.5 cursor-pointer">
@@ -44,13 +44,18 @@
         </div>
         {% for c in item.candidates[:4] %}
         <label class="flex items-start gap-2.5 cursor-pointer py-1">
-          <input type="radio" name="pick{{ env.index }}_{{ loop.index0 }}" value="{{ c.item_seq }}" class="mt-1">
+          <input type="radio" name="pick{{ env.index }}_{{ slot }}" value="{{ c.item_seq }}" class="mt-1">
           <span>
             <span class="text-sm">{{ c.product_name }}</span>
             <span class="text-xs text-slate-400 ml-1.5">{{ c.otc }} · {{ "%.0f"|format(c.confidence * 100) }}%</span>
           </span>
         </label>
         {% endfor %}
+        {# 잘못 고른 걸 되돌릴 수 있어야 한다. 라디오는 해제가 안 된다. #}
+        <label class="flex items-start gap-2.5 cursor-pointer py-1">
+          <input type="radio" name="pick{{ env.index }}_{{ slot }}" value="" checked class="mt-1">
+          <span class="text-sm text-slate-400">이 중에 없습니다</span>
+        </label>
       {% else %}
         <div class="text-sm text-slate-400">
           <span class="font-mono">{{ item.query }}</span> — 목록에서 찾지 못했습니다 (검사 제외)

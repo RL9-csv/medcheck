@@ -74,6 +74,47 @@ def _catalog():
 
 
 @functools.lru_cache(maxsize=1)
+def _permit():
+    """2단. 식약처 의약품 제품 허가목록. 인식만 하고 판정은 못 한다.
+
+    DUR 카탈로그는 상호작용 정보가 있는 품목만 담는다. 그런데 실물 약봉투
+    4장 24개 약 중 절반이 거기 없었다. 정장제, 유산균, 일반의약품, 특정
+    제조사 제품이 그렇다.
+
+    없으면 두 가지가 일어난다. 화면에 안 떠서 사용자가 "내 약을 못 읽었나"
+    하거나, 더 나쁘게는 비슷한 다른 약이 뜬다. 실물에서 이렇게 났다.
+
+        에리우스정(DUR 에 없음)  ->  에이리스정  80점
+        메드닌정(DUR 에 없음)    ->  메드론정(스테로이드)  75점
+
+    두 번째가 위험하다. 안 먹는 약이 DUR 판정에 들어간다. 허가목록을 얹으면
+    진짜 이름이 top1 이 되고 엉뚱한 약이 밀린다. 임계를 안 건드리고 고쳐진다.
+
+    취하된 품목은 뺀다. 지금 조제되지 않는다.
+    """
+    conn = connect()
+    try:
+        rows = [(r[0], (r[1] or "").strip())
+                for r in conn.execute(
+                    "SELECT ITEM_SEQ, ITEM_NAME FROM permit WHERE CANCEL_NAME != '취하'")]
+    except Exception:
+        rows = []          # permit 테이블이 없어도 1단만으로 돈다
+    finally:
+        conn.close()
+    return rows
+
+
+@functools.lru_cache(maxsize=1)
+def _permit_names():
+    return [n for _, n in _permit()]
+
+
+@functools.lru_cache(maxsize=1)
+def _dur_seqs():
+    return {seq for seq, *_ in _catalog()}
+
+
+@functools.lru_cache(maxsize=1)
 def _names():
     return [r[1] for r in _catalog()]
 
@@ -167,6 +208,25 @@ def search(query: str, limit: int = 5, prefix: int | None = None):
     return out
 
 
+def _search_permit(q: str):
+    """2단에서 최선 후보 하나. 1단에 이미 있는 품목은 건너뛴다."""
+    names = _permit_names()
+    if not names or len(q) < 2:
+        return None
+    hits = process.extract(q, names, scorer=fuzz.WRatio, limit=5, score_cutoff=int(SUGGEST * 100))
+    rows, dur = _permit(), _dur_seqs()
+    for _, score, idx in hits:
+        seq, name = rows[idx]
+        if seq in dur:
+            continue
+        if not _long_enough(q, name):
+            continue
+        return Medication(item_seq=seq, product_name=name, otc="",
+                          ingredients=[], confidence=round(score / 100, 3),
+                          dur_covered=False)
+    return None
+
+
 def resolve(query: str):
     """(확정된 약 | None, 후보목록, 상태)  상태: auto | suggest | none
 
@@ -191,8 +251,18 @@ def resolve(query: str):
             if alt and alt[0].confidence >= SUGGEST:
                 cands, q = alt, head
     if not cands or cands[0].confidence < SUGGEST:
+        # 1단(DUR)에 없다. 2단(허가목록)에서 찾는다. 이름만 맞히고 판정은 못 한다.
+        p = _search_permit(q)
+        if p:
+            return (p, [p], "auto") if p.confidence >= AUTO else (None, [p], "suggest")
         return None, [], "none"
     top = cands[0]
+
+    # 1단 후보가 있어도 2단이 더 잘 맞으면 그쪽이다. 에리우스정(2단)이
+    # 에이리스정(1단)에 80점으로 붙던 것을 이게 막는다.
+    p = _search_permit(q)
+    if p and p.confidence > top.confidence + MARGIN:
+        return (p, [p] + cands[:2], "auto") if p.confidence >= AUTO             else (None, [p] + cands[:2], "suggest")
 
     unambiguous = len(cands) == 1 or (top.confidence - cands[1].confidence) >= MARGIN
     if not (top.confidence >= AUTO and unambiguous):

@@ -27,6 +27,10 @@ class Medication:
     ingredients: list[Ingredient] = field(default_factory=list)
     confidence: float = 1.0        # 사전 매칭 신뢰도
     confirmed: bool = False        # 사용자가 확인했는가
+    # DUR 카탈로그에 있는가. 허가목록에만 있는 약은 이름은 맞히지만 상호작용
+    # 정보가 없다. 실물 4장에서 약의 절반이 그랬다. "못 읽었다" 와 "읽었는데
+    # 볼 정보가 없다" 는 사용자에게 완전히 다르다.
+    dur_covered: bool = True
 
     @property
     def kabs_score(self) -> int:
