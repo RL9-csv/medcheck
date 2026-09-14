@@ -8,3 +8,7 @@ python-multipart==0.0.29
 requests==2.32.5
 rapidfuzz==3.14.3
 pillow==12.0.0
+
+# RapidEngine.read() 가 직접 쓴다. 사진이 올라오는 모든 요청이 그 줄을 지나는데
+# 선언에 없었다. 전이 의존성으로 깔리기를 기대하면 어느 날 다른 버전이 들어온다.
+numpy==1.26.4
