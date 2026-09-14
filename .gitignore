@@ -12,5 +12,6 @@ data/raw/
 data/*.db
 !data/dur.db
 
-# OCR 모델(31MB)은 저장소에 넣는다. 빌드 때 인터넷으로 받으면 배포 환경에서
-# 실패할 여지가 생긴다. PaddleOCR 모델은 Apache 2.0 이라 재배포 가능하다.
+# OCR 모델(29MB, ONNX)은 저장소에 넣는다. 빌드 때 인터넷으로 받으면 배포
+# 환경에서 실패할 여지가 생긴다. PaddleOCR 모델은 Apache 2.0 이라 재배포 가능하다.
+models/

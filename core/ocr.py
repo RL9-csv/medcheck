@@ -114,6 +114,52 @@ class PaddleEngine:
         return [Line(t, float(c)) for _box, (t, c) in result[0] if t and t.strip()]
 
 
+class RapidEngine:
+    """PaddleOCR 과 같은 모델을 onnxruntime 으로 돌린다.
+
+    배포 때문에 만들었다. paddlepaddle 프레임워크는 수백 MB 라 카드 없이 쓰는
+    무료 티어(512MB)에 안 들어간다. 같은 모델을 ONNX 로 변환하면 런타임이
+    onnxruntime(50MB) 하나로 끝난다. 모델이 같으므로 정확도도 같아야 한다.
+    같은지는 실물 사진으로 확인하고 갈아탄다.
+
+    ONNX_MODEL_DIR 에 det.onnx / rec.onnx / cls.onnx / korean_dict.txt 가 있어야 한다.
+    """
+    name = "rapid"
+    parallel_safe = True      # 세션이 스레드 안전하다
+
+    @staticmethod
+    @functools.lru_cache(maxsize=1)
+    def _build():
+        from rapidocr_onnxruntime import RapidOCR
+        root = pathlib.Path(os.environ.get("ONNX_MODEL_DIR", "models_onnx"))
+        return RapidOCR(
+            det_model_path=str(root / "det.onnx"),
+            rec_model_path=str(root / "rec.onnx"),
+            cls_model_path=str(root / "cls.onnx"),
+            rec_keys_path=str(root / "korean_dict.txt"),
+            use_cls=False,          # 각도 분류는 글자를 망가뜨렸다. paddle 때 확인함
+            # 긴 변을 1280 으로 맞춘다. 기본값은 limit_type=min 이라 짧은 변만 보고
+            # 3024px 사진을 원본 크기로 돌린다. 줄 수는 같은데 시간만 든다.
+            det_limit_type="max",
+            det_limit_side_len=1280,
+        )
+
+    @classmethod
+    def _reader(cls):
+        return cls._build()
+
+    def read(self, image: bytes) -> list[Line]:
+        import numpy as np
+        from PIL import Image
+        import io
+
+        img = np.array(Image.open(io.BytesIO(image)).convert("RGB"))
+        res, _ = self._reader()(img)
+        if not res:
+            return []
+        return [Line(t.strip(), float(c)) for _, t, c in res if t and t.strip()]
+
+
 class GoogleVisionEngine:
     """GOOGLE_APPLICATION_CREDENTIALS 또는 GOOGLE_VISION_KEY 필요."""
     name = "google"
@@ -170,7 +216,7 @@ class ClovaEngine:
         return out
 
 
-_ENGINES = {e.name: e for e in (PaddleEngine, GoogleVisionEngine, ClovaEngine)}
+_ENGINES = {e.name: e for e in (PaddleEngine, RapidEngine, GoogleVisionEngine, ClovaEngine)}
 
 
 @functools.lru_cache(maxsize=1)
@@ -208,3 +254,9 @@ def warmup(engine: OcrEngine) -> None:
     warm = getattr(engine, "_reader", None)
     if callable(warm):
         warm()
+    # 세션만 만들면 첫 사진이 실제 추론 비용을 다 낸다. rapid 에서 그게
+    # 장당 41초로 나왔고 두 번째부터는 12초였다. 작은 이미지로 한 번 돌린다.
+    try:
+        engine.read(_warm_image())
+    except Exception:
+        pass

@@ -1,3 +1,11 @@
-# 로컬에서 테스트를 통과한 버전으로 고정한다. 배포 컨테이너가 이걸 깐다.
-paddlepaddle==2.6.2
-paddleocr==2.9.1
+# 배포 컨테이너가 까는 OCR 런타임.
+#
+# paddlepaddle 대신 onnxruntime 을 쓴다. 같은 모델을 ONNX 로 변환해서 돌리므로
+# 정확도는 같고(실물 5장에서 auto 9, 정답도달 11/24 로 동일) 런타임이 수백 MB
+# 에서 50MB 로 줄어든다. 카드 없이 쓰는 무료 티어가 512MB 라 이게 아니면
+# 배포 자체가 안 된다.
+#
+# 로컬 개발에서 paddle 을 쓰려면 requirements-paddle.txt 를 따로 깐다.
+# OCR_ENGINE 환경변수로 고른다.
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.23.2
