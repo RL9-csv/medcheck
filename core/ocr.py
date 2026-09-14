@@ -142,6 +142,11 @@ class RapidEngine:
             # 3024px 사진을 원본 크기로 돌린다. 줄 수는 같은데 시간만 든다.
             det_limit_type="max",
             det_limit_side_len=1280,
+            # 코어 수에 맞춰 호출부가 정한다. 무료 티어는 0.1~0.5 vCPU 라
+            # 스레드를 늘리면 경쟁만 는다. 실측: 4스레드 12.8s, 1스레드 29.8s,
+            # 24스레드 25.8s. 많이 준다고 빨라지지 않는다.
+            intra_op_num_threads=int(os.environ.get("OCR_THREADS", "0")) or -1,
+            inter_op_num_threads=int(os.environ.get("OCR_THREADS", "0")) or -1,
         )
 
     @classmethod

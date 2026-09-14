@@ -43,8 +43,16 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             STATE["ocr"] = f"unavailable ({type(e).__name__})"
 
+    # 샘플 봉투도 미리 읽어둔다. 안 하면 첫 방문자가 13초를 낸다.
+    # 투표 기간에 링크를 처음 누르는 사람이 그 13초를 맞는다.
+    with t.stage("sample_preload"):
+        try:
+            n_sample = len(_sample_lines())
+        except Exception:
+            n_sample = -1
+
     STATE["ready"] = True
-    t.emit("startup", ocr=STATE["ocr"], catalog_items=n, catalog_version=STATE["version"]["catalog_version"])
+    t.emit("startup", sample_lines=n_sample, ocr=STATE["ocr"], catalog_items=n, catalog_version=STATE["version"]["catalog_version"])
     yield
 
 
@@ -101,6 +109,71 @@ def _envelope(index, label, lines, trace, drop_none=False):
             "dropped": dropped, "read": read}
 
 
+MAX_SIDE = 1280          # OCR 전에 긴 변을 이만큼으로 줄인다
+
+
+def _shrink(blob: bytes) -> bytes:
+    """OCR 에 넣기 전에 사진을 줄인다.
+
+    요즘 폰 사진은 3000px 이 넘는데 그 해상도가 정확도를 안 올린다. 실물
+    5장에서 원본과 1280px 의 검출 결과가 같았고 시간만 1.3배 들었다.
+    무료 티어는 0.1~0.5 vCPU 라 이 차이가 그대로 사용자 대기시간이 된다.
+
+    실패하면 원본을 그대로 쓴다. 여기서 요청을 죽이지 않는다.
+    """
+    try:
+        import io
+        from PIL import Image
+
+        im = Image.open(io.BytesIO(blob))
+        if max(im.size) <= MAX_SIDE:
+            return blob
+        im = im.convert("RGB")
+        im.thumbnail((MAX_SIDE, MAX_SIDE))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=88)
+        return buf.getvalue()
+    except Exception:
+        return blob
+
+
+SAMPLE = Path("static/sample.png")
+_SAMPLE_CACHE: list | None = None
+
+
+def _sample_lines() -> list[str]:
+    """샘플 봉투의 OCR 결과. 한 번만 읽고 프로세스가 살아 있는 동안 재사용한다.
+
+    투표 기간에 링크를 누르는 사람 대부분은 약봉투 사진이 없다. 뭐 하는
+    물건인지 보고 싶을 뿐이다. 그런데 무료 티어에서 OCR 한 장이 30~60초다.
+    첫 화면에서 그만큼 기다리면 닫는다.
+
+    샘플은 고정된 파일이라 결과도 고정이다. 한 번 읽어두고 그 뒤로는
+    OCR 을 안 돈다. 자기 사진을 올리는 사람은 기다릴 이유가 있다.
+    """
+    global _SAMPLE_CACHE
+    if _SAMPLE_CACHE is None:
+        try:
+            page = ocr.get_engine().read(SAMPLE.read_bytes())
+            _SAMPLE_CACHE = [l.text for l in page]
+        except Exception:
+            _SAMPLE_CACHE = []
+    return _SAMPLE_CACHE
+
+
+@app.post("/sample", response_class=HTMLResponse)
+async def sample(request: Request):
+    """샘플 봉투로 바로 확인 화면까지 간다. OCR 을 돌지 않는다."""
+    t = Trace()
+    with t.stage("matching"):
+        env = _envelope(1, "샘플 약봉투", _sample_lines(), t, drop_none=True)
+    t.count("sample", 1)
+    t.emit("sample", engine=ocr.get_engine().name)
+    return tpl.TemplateResponse(request, "confirm.html", {
+        "envelopes": [env], "symptoms": [], "symptom_defs": engine.SYMPTOMS,
+        "trace": t.stages, "from_photo": True, "is_sample": True})
+
+
 @app.post("/upload", response_class=HTMLResponse)
 async def upload(request: Request):
     """약봉투 사진 -> 확인 화면. 여러 장을 동시에 읽는다."""
@@ -117,7 +190,7 @@ async def upload(request: Request):
         blob = await f.read()
         if not blob or len(blob) > MAX_BYTES:
             continue
-        images.append(blob)
+        images.append(_shrink(blob))
         labels.append((form.get(f"label{i}") or "").strip())
 
     if not images:

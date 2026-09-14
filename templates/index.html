@@ -32,10 +32,35 @@
 
   {% include "_symptoms.html" %}
 
-  <button class="w-full bg-slate-900 text-white rounded-xl py-3.5 font-medium hover:bg-slate-800">
+  {# 사진 읽기는 무료 서버에서 장당 30초가 넘는다. 누른 뒤 빈 화면이면
+     기다리는 건지 멈춘 건지 알 수 없다. 눌린 순간 문구를 바꾼다. #}
+  <button id="go"
+          class="w-full bg-slate-900 text-white rounded-xl py-3.5 font-medium hover:bg-slate-800
+                 disabled:bg-slate-400 disabled:cursor-wait">
     사진에서 약 찾기
   </button>
+  <p id="wait" class="hidden text-sm text-slate-500 text-center">
+    사진에서 글자를 읽고 있습니다. 한 장에 30초쯤 걸립니다.
+  </p>
 </form>
+
+{# 약봉투가 없는 사람도 눌러볼 수 있어야 한다. 샘플은 결과를 미리 읽어두므로
+   즉시 뜬다. #}
+<form method="post" action="/sample" class="mt-3">
+  <button class="w-full border border-slate-300 text-slate-700 rounded-xl py-3
+                 font-medium hover:bg-slate-50">
+    약봉투가 없어요 · 샘플로 해보기
+  </button>
+</form>
+
+<script>
+  document.querySelector('form[action="/upload"]').addEventListener('submit', function () {
+    var b = document.getElementById('go');
+    b.disabled = true;
+    b.textContent = '읽는 중입니다';
+    document.getElementById('wait').classList.remove('hidden');
+  });
+</script>
 
 <details class="mt-5">
   <summary class="cursor-pointer text-sm text-slate-500 hover:text-slate-700 py-2">

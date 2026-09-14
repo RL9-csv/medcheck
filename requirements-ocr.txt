@@ -9,3 +9,6 @@
 # OCR_ENGINE 환경변수로 고른다.
 rapidocr-onnxruntime==1.4.4
 onnxruntime==1.23.2
+# RapidEngine.read() 가 직접 쓴다. 사진이 올라오는 모든 요청이 그 줄을 지난다.
+# 전이 의존성으로 깔리기를 기대하면 어느 날 다른 버전이 들어온다.
+numpy==1.26.4
