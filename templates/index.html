@@ -32,17 +32,27 @@
 
   {% include "_symptoms.html" %}
 
-  {# 사진 읽기는 무료 서버에서 장당 30초가 넘는다. 누른 뒤 빈 화면이면
-     기다리는 건지 멈춘 건지 알 수 없다. 눌린 순간 문구를 바꾼다. #}
+  {# 사진 읽기는 무료 서버에서 장당 30초가 넘는다. 그냥 느린 것과 멈춘 것을
+     사람은 구분하지 못한다. 초를 세어 보여주면 "돌고 있다" 는 신호가 된다.
+     진행 막대는 가짜로 채우지 않는다. 실제로 몇 장 중 몇 장인지 모르기 때문에
+     거짓 진행률을 보여주면 그게 더 나쁘다. #}
   <button id="go"
           class="w-full bg-slate-900 text-white rounded-xl py-3.5 font-medium hover:bg-slate-800
                  disabled:bg-slate-400 disabled:cursor-wait">
     사진에서 약 찾기
   </button>
-  <p id="wait" class="hidden text-sm text-slate-500 text-center">
-    사진에서 글자를 읽고 있습니다. 한 장에 30초쯤 걸립니다.
-  </p>
 </form>
+
+<div id="wait" class="hidden mt-4 text-center">
+  <div class="inline-flex items-center gap-2 text-sm text-slate-600">
+    <span class="inline-block w-4 h-4 border-2 border-slate-300 border-t-slate-700
+                 rounded-full animate-spin"></span>
+    <span>사진에서 글자를 읽고 있습니다</span>
+  </div>
+  <div class="mt-1.5 text-xs text-slate-400">
+    <span id="elapsed">0</span>초 지났습니다 · <span id="hint">보통 한 장에 30초쯤 걸립니다</span>
+  </div>
+</div>
 
 {# 약봉투가 없는 사람도 눌러볼 수 있어야 한다. 샘플은 결과를 미리 읽어두므로
    즉시 뜬다. #}
@@ -56,9 +66,23 @@
 <script>
   document.querySelector('form[action="/upload"]').addEventListener('submit', function () {
     var b = document.getElementById('go');
+    var n = 0;
+    document.querySelectorAll('input[type=file]').forEach(function (f) { if (f.files.length) n++; });
     b.disabled = true;
     b.textContent = '읽는 중입니다';
     document.getElementById('wait').classList.remove('hidden');
+    if (n > 1) {
+      document.getElementById('hint').textContent = n + '장이라 ' + (n * 30) + '초쯤 걸립니다';
+    }
+    var t0 = Date.now();
+    var el = document.getElementById('elapsed');
+    var hint = document.getElementById('hint');
+    setInterval(function () {
+      var s = Math.round((Date.now() - t0) / 1000);
+      el.textContent = s;
+      // 예상보다 오래 걸리면 문구를 바꾼다. 멈춘 게 아니라는 말이 필요하다.
+      if (s > n * 45 + 20) { hint.textContent = '조금 더 걸리고 있습니다. 멈춘 것이 아닙니다'; }
+    }, 1000);
   });
 </script>
 
@@ -69,7 +93,34 @@
 
   <form method="post" action="/confirm" class="space-y-5 mt-3">
     <div class="card p-5">
-      <p class="text-sm text-slate-500 mb-4">봉투별로 나눠서, 한 줄에 하나씩 적어주세요.</p>
+      <p class="text-sm text-slate-500 mb-2">봉투별로 나눠서, 한 줄에 하나씩 적어주세요.</p>
+
+      {# 어디까지 적어야 하는지를 사용자가 모른다. 약봉투에는 제품명·용량·용법이
+         한 줄에 인쇄돼 있어서 통째로 옮겨 적기 쉽다. 실측으로 갈렸다.
+
+           에어탈정                  auto
+           에어탈정 100mg            suggest   용량을 적으면 오히려 나빠진다
+           에어탈정 1일3회 식후30분     auto      용법은 붙어도 안 나빠진다
+           아세클로페낙               suggest -> 아세페낙정   성분명만 적으면 다른 약
+
+         용량이 나쁜 이유는 카탈로그 이름의 표기와 다르기 때문이다.
+         "100mg" 과 "100밀리그램" 이 다르게 읽힌다. #}
+      <div class="mb-4 text-sm bg-slate-50 rounded-lg p-3.5 leading-relaxed">
+        <div class="font-medium text-slate-700 mb-1.5">약 이름만 적으시면 됩니다</div>
+        <div class="text-slate-600">
+          봉투에 인쇄된 <span class="font-medium">제품 이름</span>만 적어주세요.
+          용량이나 성분 이름은 없어도 됩니다.
+        </div>
+        <div class="mt-2 space-y-0.5 font-mono text-xs">
+          <div class="text-emerald-700">에어탈정</div>
+          <div class="text-emerald-700">코대원포르테시럽</div>
+          <div class="text-slate-400 line-through">에어탈정 100mg &nbsp;<span class="font-sans no-underline">용량은 빼주세요</span></div>
+          <div class="text-slate-400 line-through">아세클로페낙 &nbsp;<span class="font-sans no-underline">성분 이름만으로는 다른 약이 나옵니다</span></div>
+        </div>
+        <div class="mt-2 text-xs text-slate-500">
+          정확한 이름이 기억나지 않으면 아는 만큼만 적어주세요. 비슷한 약을 찾아서 보여드립니다.
+        </div>
+      </div>
       {% for i in [1,2,3] %}
       <div class="mb-4">
         <div class="flex items-center gap-2 mb-1.5">

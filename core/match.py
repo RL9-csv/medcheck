@@ -190,7 +190,7 @@ def search(query: str, limit: int = 5, prefix: int | None = None):
     if len(q) < 2:
         return []
     cat, names = _catalog(), _names()
-    hits = process.extract(q, names, scorer=fuzz.WRatio, limit=limit * 4, score_cutoff=50)
+    hits = _rank(q, names, limit * 4)
 
     out, seen_seq = [], set()
     for _, score, idx in hits:
@@ -208,12 +208,49 @@ def search(query: str, limit: int = 5, prefix: int | None = None):
     return out
 
 
+def _head(name: str) -> str:
+    """첫 괄호 앞까지. 채점용 짧은 이름이다.
+
+    _bare() 는 끝의 괄호만 떼는데 성분명 안에 괄호가 또 있으면 못 뗀다.
+        애니크라정375밀리그램(아목시실린수화물-묽은클라불란산칼륨(2:1))
+        _bare  -> ...묽은클라불란산칼륨      여전히 길다
+        _head  -> 애니크라정375밀리그램       이게 필요한 것
+    """
+    i = name.find("(")
+    return (name[:i] if i > 0 else name).strip()
+
+
+def _rank(q: str, names, limit: int):
+    """괄호를 뗀 이름으로도 재서 높은 쪽을 쓴다.
+
+    카탈로그 이름이 "제품명(성분명)" 이라 성분명이 길수록 손해를 본다.
+    WRatio 가 길이 비율로 깎기 때문이다. 실물에서 이렇게 났다.
+
+        OCR 줄   애니크라정375밀리그램아목
+        정답     애니크라정375밀리그램(아목시실린수화물-묽은클라불란산칼륨(2:1))  37자  83.6
+        오답     유니크라정375밀리그램                                  12자  84.6
+
+    내용은 정답이 훨씬 가까운데 길이 때문에 진다. 괄호를 떼면 92.3 대 84.6 이다.
+    그래서 둘 다 재고 높은 쪽을 점수로 쓴다. 괄호 안 성분명이 질의에 실제로
+    들어 있으면 원래 점수가 이기므로 손해가 없다.
+    """
+    full = process.extract(q, names, scorer=fuzz.WRatio, limit=limit, score_cutoff=50)
+    bare = process.extract(q, [_head(n) for n in names],
+                           scorer=fuzz.WRatio, limit=limit, score_cutoff=50)
+    best: dict[int, float] = {}
+    for _, s, i in list(full) + list(bare):
+        if s > best.get(i, 0):
+            best[i] = s
+    return [(names[i], s, i) for i, s in
+            sorted(best.items(), key=lambda kv: -kv[1])[:limit]]
+
+
 def _search_permit(q: str):
     """2단에서 최선 후보 하나. 1단에 이미 있는 품목은 건너뛴다."""
     names = _permit_names()
     if not names or len(q) < 2:
         return None
-    hits = process.extract(q, names, scorer=fuzz.WRatio, limit=5, score_cutoff=int(SUGGEST * 100))
+    hits = _rank(q, names, 5)
     rows, dur = _permit(), _dur_seqs()
     for _, score, idx in hits:
         seq, name = rows[idx]
