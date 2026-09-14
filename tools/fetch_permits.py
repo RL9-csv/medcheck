@@ -16,7 +16,14 @@ DUR 카탈로그(19,441건)는 상호작용 정보가 있는 품목만 담는다
 import os, pathlib, re, sqlite3, sys, time
 import requests
 
-URL = "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnInq07"
+# 두 곳에서 받는다. 공개 API 하나가 전체를 안 준다.
+#   허가정보   42,986건   제품 허가 원장
+#   낱알식별   25,426건   알약 식별용. 40%가 허가정보에 없는 품목이다
+# 실물에서 비졸본정이 허가정보엔 없고 낱알식별에만 있었다.
+SOURCES = [
+    ("permit", "https://apis.data.go.kr/1471000/DrugPrdtPrmsnInfoService07/getDrugPrdtPrmsnInq07"),
+    ("grain",  "https://apis.data.go.kr/1471000/MdcinGrnIdntfcInfoService03/getMdcinGrnIdntfcInfoList03"),
+]
 DB = pathlib.Path(__file__).resolve().parent.parent / "data" / "dur.db"
 ROWS = 500         # API 최대치. 86페이지로 끝난다
 
@@ -33,13 +40,13 @@ def _key() -> str:
     return k
 
 
-def _get(key: str, page: int, tries: int = 4):
+def _get(url: str, key: str, page: int, tries: int = 4):
     """공공데이터포털은 간헐적으로 연결이 끊긴다. 173페이지에서 한 번 죽었다.
     URL 이 예외 메시지에 실려 키가 로그에 남으므로 예외를 그대로 올리지 않는다."""
     last = ""
     for i in range(tries):
         try:
-            r = requests.get(URL, params={"serviceKey": key, "type": "json",
+            r = requests.get(url, params={"serviceKey": key, "type": "json",
                                           "numOfRows": ROWS, "pageNo": page}, timeout=60)
             r.raise_for_status()
             return r.json()
@@ -49,10 +56,10 @@ def _get(key: str, page: int, tries: int = 4):
     raise SystemExit(f"{page}페이지에서 {tries}회 실패 ({last})")
 
 
-def fetch_all(key: str):
+def fetch_all(key: str, url: str):
     page, out = 1, []
     while True:
-        b = _get(key, page).get("body") or {}
+        b = _get(url, key, page).get("body") or {}
         items = b.get("items") or []
         if not items:
             break
@@ -72,7 +79,14 @@ def fetch_all(key: str):
 
 
 def main():
-    rows = fetch_all(_key())
+    key = _key()
+    rows, seen = [], set()
+    for label, url in SOURCES:
+        got = fetch_all(key, url)
+        added = [r for r in got if r[0] not in seen]
+        seen.update(r[0] for r in got)
+        rows += added
+        print(f"  {label}: {len(got)}건 중 신규 {len(added)}건")
     conn = sqlite3.connect(DB)
     conn.execute("DROP TABLE IF EXISTS permit")
     conn.execute("""CREATE TABLE permit (

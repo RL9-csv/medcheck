@@ -90,13 +90,19 @@ def _permit():
     두 번째가 위험하다. 안 먹는 약이 DUR 판정에 들어간다. 허가목록을 얹으면
     진짜 이름이 top1 이 되고 엉뚱한 약이 밀린다. 임계를 안 건드리고 고쳐진다.
 
-    취하된 품목은 뺀다. 지금 조제되지 않는다.
+    취하된 품목도 넣는다. 처음에는 뺐는데 실물에서 걸렸다.
+
+        킨도라제정(스트렙토키나제스트렙토도르나제)   취하
+
+    봉투에 인쇄돼 있으면 사용자는 그 약을 실제로 갖고 있다. 약국 재고이거나
+    오래된 봉투다. "취하라서 안 보여준다" 는 우리 편의지 사용자 사정이 아니다.
+    허가 상태는 판정에 안 쓰고 인식에만 쓰므로 넣어도 위험이 없다.
     """
     conn = connect()
     try:
         rows = [(r[0], (r[1] or "").strip())
                 for r in conn.execute(
-                    "SELECT ITEM_SEQ, ITEM_NAME FROM permit WHERE CANCEL_NAME != '취하'")]
+                    "SELECT ITEM_SEQ, ITEM_NAME FROM permit")]
     except Exception:
         rows = []          # permit 테이블이 없어도 1단만으로 돈다
     finally:
@@ -208,6 +214,25 @@ def search(query: str, limit: int = 5, prefix: int | None = None):
     return out
 
 
+# 같은 말인데 표기가 갈리는 것들. 카탈로그 안에서 둘 다 실재한다.
+# 봉투 인쇄와 허가 등재명이 다르면 한 글자 차이로 다른 제형이 1위가 된다.
+#
+#   뮤테란캅셀  ->  뮤테란과립200밀리그램   67.5   틀린 제형
+#   뮤테란캡슐  ->  뮤테란캡슐200밀리그램   90.0   정답
+#
+# 카탈로그 등재 건수로 주류를 정했다. 캡슐 7,821 대 캅셀 126, 밀리그램
+# 24,686 대 밀리그람 952. 소수파를 주류로 옮긴다. 양쪽 다 정규화하므로
+# 어느 쪽으로 인쇄돼 있든 만난다.
+_SPELL = [("캅셀", "캡슐"), ("캅슐", "캡슐"),
+          ("밀리그람", "밀리그램"), ("마이크로그람", "마이크로그램")]
+
+
+def _spell(s: str) -> str:
+    for a, b in _SPELL:
+        s = s.replace(a, b)
+    return s
+
+
 def _head(name: str) -> str:
     """첫 괄호 앞까지. 채점용 짧은 이름이다.
 
@@ -234,8 +259,10 @@ def _rank(q: str, names, limit: int):
     그래서 둘 다 재고 높은 쪽을 점수로 쓴다. 괄호 안 성분명이 질의에 실제로
     들어 있으면 원래 점수가 이기므로 손해가 없다.
     """
-    full = process.extract(q, names, scorer=fuzz.WRatio, limit=limit, score_cutoff=50)
-    bare = process.extract(q, [_head(n) for n in names],
+    qn = _spell(q)
+    full = process.extract(qn, [_spell(n) for n in names],
+                           scorer=fuzz.WRatio, limit=limit, score_cutoff=50)
+    bare = process.extract(qn, [_spell(_head(n)) for n in names],
                            scorer=fuzz.WRatio, limit=limit, score_cutoff=50)
     best: dict[int, float] = {}
     for _, s, i in list(full) + list(bare):
