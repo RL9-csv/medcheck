@@ -159,3 +159,14 @@ def make_questions(findings, symptoms) -> list[str]:
             qs.append("식약처 노인주의 정보가 등록된 약이 포함되어 있습니다. "
                       "현재 상태에서 계속 복용해도 되는지 확인 부탁드립니다.")
     return qs[:3]
+
+
+def protected_terms(findings, symptoms) -> list[str]:
+    """다듬을 때 절대 바뀌면 안 되는 단어.
+
+    텍스트에서 추측하지 않고 판정 결과에서 직접 꺼낸다.
+    성분명이나 효능군이 바뀌면 그건 다른 질문이 된다.
+    """
+    terms = [f.subject for f in findings if f.subject]
+    terms += [SYMPTOM_LABEL.get(s, s) for s in (symptoms or [])]
+    return terms

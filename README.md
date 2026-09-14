@@ -1,3 +1,13 @@
+---
+title: medcheck
+emoji: 💊
+colorFrom: blue
+colorTo: green
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # medcheck
 
 여러 병원에서 받은 약을 한 장으로 정리합니다.

@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from core import match, engine, ocr
+from core import match, engine, lines as lines_mod, ocr, polish
 from core.model import Review, Source
 from core.matrix import build_matrix
 from core.telemetry import Trace
@@ -79,9 +79,16 @@ def _envelope(index, label, lines, trace, drop_none=False):
 
     drop_none: 사진은 병원명·용법·약사명까지 다 읽힌다. 아무 품목과도
     맞지 않는 줄은 화면에서 빼고 몇 줄이 빠졌는지만 알린다.
-    카탈로그 자체가 필터 역할을 하므로 별도 개체명 인식이 필요 없다.
+
+    막는 층이 둘이다. 어느 하나만으로는 안 막힌다.
+      lines.filter_lines   조제일자·용법용량 같은 안내 문구를 패턴으로 제거
+      match 의 길이 가드    "식후" -> 후라시닐정 같은 짧은 조각의 오탐을 차단
     """
-    items, dropped = [], 0
+    read = len(lines)                      # 화면에 보여줄 값은 OCR이 실제로 읽은 줄 수다
+    lines, pre_dropped = lines_mod.filter_lines(lines)
+    trace.count("line_filtered", pre_dropped)
+
+    items, dropped = [], pre_dropped
     for line in lines:
         med, cands, status = match.resolve(line)
         trace.count(status)
@@ -91,7 +98,7 @@ def _envelope(index, label, lines, trace, drop_none=False):
         items.append({"query": line, "status": status,
                       "auto": med, "candidates": cands})
     return {"index": index, "label": label, "items": items,
-            "dropped": dropped, "read": len(lines)}
+            "dropped": dropped, "read": read}
 
 
 @app.post("/upload", response_class=HTMLResponse)
@@ -201,8 +208,18 @@ async def result(request: Request):
         matrix = build_matrix(review)
 
     with t.stage("questions"):
-        # LLM은 아직 붙이지 않았다. 붙일 때도 실패하면 이 템플릿으로 되돌아온다.
         questions = engine.make_questions(findings, symptoms)
+
+    # 판정은 위에서 끝났다. LLM 은 문장만 만진다.
+    # 키가 없거나 호출이 죽거나 검증에 걸리면 위 템플릿이 그대로 나간다.
+    with t.stage("polish"):
+        questions, route, pstats = polish.polish(
+            questions, engine.protected_terms(findings, symptoms))
+    # 경로는 호출이 됐는지, 집계는 몇 문장이 통과했는지를 말한다.
+    # 둘을 하나로 뭉치면 부분 거부가 안 보인다.
+    t.count(f"polish_{route}")
+    for k, n in pstats.items():
+        t.count(f"polish_{k}", n)
 
     t.count("meds", len(review.all_meds))
     t.count("sources", len(review.sources))
