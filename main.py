@@ -325,6 +325,18 @@ async def result(request: Request):
                     seqs.extend([v for v in form.getlist(k) if v])
             if not seqs:
                 continue
+            # 같은 봉투 안 같은 품목은 한 번만 센다. OCR 이 같은 약을 두 줄로
+            # 읽고(싸이메트정 / 싸아메트정) 매칭이 둘 다 같은 품목으로 정확히
+            # 확정하면 사람이 둘 다 체크한다. 그러면 KABS 합산이 두 배가 되어
+            # 없는 소견이 생긴다. 실물 약봉투에서 이렇게 났다.
+            #   항콜린 부담 합계가 4점입니다 (검토 권장 3점 이상)
+            #     2점 시메티딘 — 싸이메트정(시메티딘)
+            #     2점 시메티딘 — 싸이메트정(시메티딘)
+            # 한 종 2점이라 실제로는 권장 기준 아래다.
+            #
+            # 봉투가 다르면 접지 않는다. 다른 병원에서 같은 약을 받은 것을
+            # 찾아내는 게 이 도구의 목적이다. 접는 범위는 봉투 안이다.
+            seqs = list(dict.fromkeys(seqs))
             src = Source(index=i, label=(form.get(f"label{i}") or "").strip() or None)
             src.medications = _load_meds(seqs)
             if src.medications:
