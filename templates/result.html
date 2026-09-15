@@ -41,6 +41,25 @@
       </tbody>
     </table>
   </div>
+
+  {% set unjudged = review.all_meds | rejectattr("dur_covered") | list %}
+  {% if unjudged %}
+  <div class="mt-4 pt-4 border-t border-slate-100">
+    <div class="text-sm font-medium text-slate-700 mb-1.5">
+      아래 {{ unjudged|length }}개는 이름만 확인했습니다
+    </div>
+    <ul class="text-sm text-slate-600 space-y-0.5 mb-2">
+      {% for m in unjudged %}
+      <li>{{ m.product_name }}</li>
+      {% endfor %}
+    </ul>
+    <div class="text-xs text-slate-500 leading-relaxed">
+      이 약들은 공개된 성분 정보가 없어 위 표와 아래 소견에 들어가지
+      않았습니다. 문제가 없다는 뜻이 아니라 저희가 확인하지 못했다는
+      뜻입니다. 진료 때 이 이름들을 함께 보여주십시오.
+    </div>
+  </div>
+  {% endif %}
 </div>
 
 <div class="card p-5 mb-5">

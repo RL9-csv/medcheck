@@ -279,18 +279,34 @@ async def confirm(request: Request):
 
 
 def _load_meds(seqs):
-    """확정된 품목코드 -> Medication. 사람이 고른 것만 들어온다."""
-    from core.match import _catalog, _ingredients_cached
+    """확정된 품목코드 -> Medication. 사람이 고른 것만 들어온다.
+
+    1단(DUR)에 없으면 2단(허가목록)을 본다. 전에는 1단만 보고 없으면
+    continue 했는데, 그러면 사람이 확인 화면에서 분명히 고른 약이
+    결과에서 아무 말 없이 사라졌다. 실물 13장에서 auto 확정 43건 중
+    20건(47%)이 2단이었다.
+
+    2단은 이름만 있고 성분이 없다. 상호작용 판정을 못 한다. 그래서
+    dur_covered=False 로 표시해 화면이 "판정 대상이 아니다" 를 말할 수
+    있게 한다. 목록에서 지우는 것과 판정을 못 하는 것은 다르다.
+    """
+    from core.match import _catalog, _permit, _ingredients_cached
     from core.model import Medication
     by_seq = {r[0]: r for r in _catalog()}
+    permit = dict(_permit())
     out = []
     for seq in seqs:
         r = by_seq.get(seq)
-        if not r:
+        if r:
+            out.append(Medication(item_seq=r[0], product_name=r[1], otc=r[3],
+                                  ingredients=list(_ingredients_cached(r[2])),
+                                  confidence=1.0, confirmed=True))
             continue
-        out.append(Medication(item_seq=r[0], product_name=r[1], otc=r[3],
-                              ingredients=list(_ingredients_cached(r[2])),
-                              confidence=1.0, confirmed=True))
+        name = permit.get(seq)
+        if name:
+            out.append(Medication(item_seq=seq, product_name=name, otc="",
+                                  ingredients=[], confidence=1.0,
+                                  confirmed=True, dur_covered=False))
     return out
 
 
