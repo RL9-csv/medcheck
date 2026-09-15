@@ -15,6 +15,7 @@ SQL LIKE 만으로는 오타가 들어오면 후보가 0이 된다. 따라서 �
 * 임계값은 잠정치. 실제 약봉투로 threshold sweep 후 확정한다.
 """
 import re, functools
+from dataclasses import replace
 from rapidfuzz import process, fuzz
 from .db import connect, TABS, norm_kor
 from .model import Medication, Ingredient
@@ -245,7 +246,18 @@ def _head(name: str) -> str:
     return (name[:i] if i > 0 else name).strip()
 
 
-def _rank(q: str, names, limit: int):
+@functools.lru_cache(maxsize=2)
+def _normed(names: tuple):
+    """카탈로그 이름을 미리 정규화해 둔다.
+
+    _rank 가 질의마다 46,554개를 두 번씩 재가공하고 있었다. 약 4개면
+    37만 번이다. 카탈로그는 프로세스 수명 동안 바뀌지 않으므로 한 번만
+    만든다. 채점 결과는 그대로다.
+    """
+    return [_spell(n) for n in names], [_spell(_head(n)) for n in names]
+
+
+def _rank(q: str, names, limit: int, cutoff: float = 50):
     """괄호를 뗀 이름으로도 재서 높은 쪽을 쓴다.
 
     카탈로그 이름이 "제품명(성분명)" 이라 성분명이 길수록 손해를 본다.
@@ -260,10 +272,11 @@ def _rank(q: str, names, limit: int):
     들어 있으면 원래 점수가 이기므로 손해가 없다.
     """
     qn = _spell(q)
-    full = process.extract(qn, [_spell(n) for n in names],
-                           scorer=fuzz.WRatio, limit=limit, score_cutoff=50)
-    bare = process.extract(qn, [_spell(_head(n)) for n in names],
-                           scorer=fuzz.WRatio, limit=limit, score_cutoff=50)
+    nfull, nhead = _normed(tuple(names))
+    full = process.extract(qn, nfull,
+                           scorer=fuzz.WRatio, limit=limit, score_cutoff=cutoff)
+    bare = process.extract(qn, nhead,
+                           scorer=fuzz.WRatio, limit=limit, score_cutoff=cutoff)
     best: dict[int, float] = {}
     for _, s, i in list(full) + list(bare):
         if s > best.get(i, 0):
@@ -272,12 +285,23 @@ def _rank(q: str, names, limit: int):
             sorted(best.items(), key=lambda kv: -kv[1])[:limit]]
 
 
-def _search_permit(q: str):
-    """2단에서 최선 후보 하나. 1단에 이미 있는 품목은 건너뛴다."""
+def _search_permit(q: str, floor: float = 0.0):
+    """2단에서 최선 후보 하나. 1단에 이미 있는 품목은 건너뛴다.
+
+    floor 는 "이 점수 이하는 어차피 버린다" 는 호출자의 약속이다.
+    rapidfuzz 에 그대로 넘기면 내부에서 가지치기를 한다. 46,554개를
+    두 패스 도는 비용이 실측으로 cutoff 50 에서 400ms, 90 에서 158ms,
+    95 에서 54ms 다. 버려질 후보를 안 고르는 것뿐이라 결과는 같다.
+    """
     names = _permit_names()
     if not names or len(q) < 2:
         return None
-    hits = _rank(q, names, 5)
+    if floor >= 1.0:
+        # 점수는 1.0 을 못 넘는다. 호출자가 버릴 것이 확정이라 돌 필요가 없다.
+        return None
+    # 반올림(round(s/100, 3))에 걸려 경계값이 잘리지 않도록 반 점 낮춘다.
+    cutoff = min(100.0, max(50.0, floor * 100 - 0.5))
+    hits = _rank(q, names, 5, cutoff)
     rows, dur = _permit(), _dur_seqs()
     for _, score, idx in hits:
         seq, name = rows[idx]
@@ -291,7 +315,7 @@ def _search_permit(q: str):
     return None
 
 
-def resolve(query: str):
+def _resolve(query: str):
     """(확정된 약 | None, 후보목록, 상태)  상태: auto | suggest | none
 
     전체 문자열과 앞 8글자로 각각 매칭해서 둘이 같은 품목을 가리킬 때만 auto 다.
@@ -324,7 +348,7 @@ def resolve(query: str):
 
     # 1단 후보가 있어도 2단이 더 잘 맞으면 그쪽이다. 에리우스정(2단)이
     # 에이리스정(1단)에 80점으로 붙던 것을 이게 막는다.
-    p = _search_permit(q)
+    p = _search_permit(q, floor=top.confidence + MARGIN)
     if p and p.confidence > top.confidence + MARGIN:
         return (p, [p] + cands[:2], "auto") if p.confidence >= AUTO             else (None, [p] + cands[:2], "suggest")
 
@@ -341,3 +365,48 @@ def resolve(query: str):
     seen = {m.item_seq for m in cands}
     merged = cands + [m for m in short if m.item_seq not in seen]
     return None, merged[:5], "suggest"
+
+
+def _clone(res):
+    """캐시가 돌려주는 결과는 복사본이어야 한다.
+
+    resolve 는 확정 시 top.confirmed = True 로 Medication 을 변형한다.
+    캐시된 객체를 그대로 넘기면 호출자끼리 같은 객체를 공유하게 되고,
+    한 봉투에서 확인한 것이 다른 봉투에 번진다. 후보 리스트도 같이
+    복사한다 — 리스트는 새로 만들어도 안의 객체는 공유되기 때문이다.
+
+    top 은 보통 cands[0] 과 같은 객체다. 그 관계를 복사본에서도 지킨다.
+    Ingredient 는 어디서도 변형하지 않으므로 공유해도 된다.
+    """
+    top, cands, status = res
+    new = [replace(c, ingredients=list(c.ingredients)) for c in cands]
+    if top is None:
+        return None, new, status
+    for old, cp in zip(cands, new):
+        if old is top:
+            return cp, new, status
+    return replace(top, ingredients=list(top.ingredients)), new, status
+
+
+# 항목 1건이 실측 4.6KB 다. 2048 이면 최대 9MB 로, 2GB 박스에서 무시할
+# 수 있다. 크기를 이만큼 잡는 이유는 한 장 안의 중복이 아니다. 사진 13장
+# 실측 중복률은 2% 뿐이다 — 같은 약이 두 번 인쇄돼도 OCR 이 다르게 읽는다
+# (한미아스피린장용정100n9 / 한미아스피린장용정1001림). 이득은 요청 사이에
+# 있다. 여러 사람이 흔한 약을 올리면 두 번째부터 0ms 다.
+@functools.lru_cache(maxsize=2048)
+def _resolve_cached(q: str):
+    return _resolve(q)
+
+
+def resolve(query: str):
+    """줄 -> (확정 약, 후보, 상태).
+
+    같은 줄이 반복해서 들어온다. 약국 영수증은 같은 약이 표와 설명란에
+    두 번씩 인쇄되고, 봉투 여러 장에 같은 약이 걸친다. 한 줄에 200ms 대가
+    붙으므로 중복만 걷어내도 그만큼 준다.
+    """
+    return _clone(_resolve_cached((query or "").strip()))
+
+
+resolve.cache_clear = _resolve_cached.cache_clear
+resolve.cache_info = _resolve_cached.cache_info

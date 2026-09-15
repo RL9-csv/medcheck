@@ -6,7 +6,7 @@
   3. 외부 AI가 죽어도 서비스는 계속 동작한다.
   4. 원본 이미지는 추출 직후 폐기하고, 로그에 PII를 남기지 않는다.
 """
-import asyncio, sys
+import asyncio, os, sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -80,6 +80,23 @@ def index(request: Request):
 
 
 MAX_FILES, MAX_BYTES = 5, 10 * 1024 * 1024
+
+# 무거운 요청(OCR+매칭)을 한 번에 몇 건까지 받을지. 1 이다.
+#
+# t3.small 은 CoreCount 1 / ThreadsPerCore 2 라 물리 코어가 하나다.
+# "2 vCPU" 가 두 배 일하는 게 아니다. 실물 사진 한 장(33줄)으로 원격
+# 측정한 처리량이 이렇다.
+#
+#   동시 1   1건 / 24.2s = 0.041 req/s
+#   동시 2   2건 / 51.3s = 0.039 req/s
+#   동시 3   3건 / 72.0s = 0.042 req/s
+#
+# 처리량이 평평하다. 동시 실행을 허용해도 초당 처리량은 그대로고 모든
+# 사용자의 대기시간만 3배가 된다. 그래서 기다리게 하지 않고 즉시
+# 503 + Retry-After 로 돌려보낸다. 24s 는 "느리다" 지만 72s 는
+# "고장났다" 로 보인다.
+HEAVY = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT", "1")))
+RETRY_AFTER = os.environ.get("RETRY_AFTER", "24")   # 실측 단건 소요시간
 
 
 def _envelope(index, label, lines, trace, drop_none=False):
@@ -198,13 +215,31 @@ async def upload(request: Request):
             "symptoms": engine.SYMPTOMS, "version": STATE["version"],
             "error": "사진을 한 장 이상 올려주세요."})
 
+    if HEAVY.locked():
+        return tpl.TemplateResponse(request, "index.html", {
+            "symptoms": engine.SYMPTOMS, "version": STATE["version"],
+            "error": f"지금 다른 사진을 읽고 있습니다. "
+                     f"{RETRY_AFTER}초 뒤에 다시 눌러 주세요."},
+            status_code=503, headers={"Retry-After": RETRY_AFTER})
+
+    async with HEAVY:
+        return await _do_upload(request, images, labels, form, t)
+
+
+async def _do_upload(request, images, labels, form, t):
     with t.stage("ocr"):
         pages = await ocr.read_many(ocr.get_engine(), images)
 
+    # 매칭은 rapidfuzz 안에서 도는 동기 연산이다. 그대로 await 없이
+    # 부르면 이벤트 루프를 붙잡는다. 실물 사진 129줄이 45초였는데 그
+    # 45초 동안 /health 를 포함해 다른 어떤 요청도 응답되지 않았다.
+    # HEALTHCHECK 가 30초 간격 3회라 긴 요청 두 건이면 컨테이너가
+    # unhealthy 로 넘어간다. 스레드로 뺀다.
     with t.stage("matching"):
-        envelopes = [_envelope(i, labels[i - 1], [l.text for l in page], t,
+        envelopes = await asyncio.to_thread(
+            lambda: [_envelope(i, labels[i - 1], [l.text for l in page], t,
                                drop_none=True)
-                     for i, page in enumerate(pages, 1)]
+                     for i, page in enumerate(pages, 1)])
 
     t.count("photos", len(images))
     t.count("empty_pages", sum(1 for p in pages if not p))
@@ -222,16 +257,19 @@ async def confirm(request: Request):
     """봉투별 입력 -> 후보 제시. 사람이 고르기 전에는 판정하지 않는다."""
     form = await request.form()
     t = Trace()
-    envelopes = []
 
-    with t.stage("matching"):
+    def build():
+        out = []
         for i in range(1, 6):
             raw = (form.get(f"env{i}") or "").strip()
             if not raw:
                 continue
             lines = [x.strip() for x in raw.splitlines() if x.strip()]
-            envelopes.append(
-                _envelope(i, form.get(f"label{i}") or "", lines, t))
+            out.append(_envelope(i, form.get(f"label{i}") or "", lines, t))
+        return out
+
+    with t.stage("matching"):
+        envelopes = await asyncio.to_thread(build)
 
     t.emit("confirm", envelopes=len(envelopes))
     return tpl.TemplateResponse(request, "confirm.html", {
