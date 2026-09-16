@@ -245,6 +245,15 @@
       }, WAIT);
     });
     inp.addEventListener('blur', function () { setTimeout(function () { close(row); }, 150); });
+
+    // 이름을 다 치고 엔터를 누르는 것이 타이핑하는 사람의 기본 습관이다.
+    // 칸이 하나뿐인 폼에서 엔터는 그대로 제출이라, 아무것도 안 고른 채
+    // 넘어가 버린다. 목록이 떠 있으면 1위를 고르고 제출을 막는다.
+    inp.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') { return; }
+      var first = row.querySelector('.menu button');
+      if (first) { e.preventDefault(); first.click(); }
+    });
   }
 
   box.querySelectorAll('.row').forEach(wire);

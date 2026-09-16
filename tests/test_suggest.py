@@ -104,3 +104,23 @@ def test_봉투에_인쇄된_이름이_후보에_들어온다(client, printed):
     head = printed[:4]
     assert any(n.startswith(head) for n in hits), \
         "%s 를 쳤는데 후보에 없다. 나온 것: %s" % (printed, hits)
+
+
+def test_아무것도_안_고르고_제출하면_막다른_길로_안_간다(client):
+    # 자동완성은 목록에서 클릭해야 품목이 정해진다. 그런데 타이핑하는
+    # 사람은 이름을 다 치고 엔터를 누른다. 칸이 하나뿐인 폼에서 엔터는
+    # 그대로 제출이라 아무것도 안 고른 채 넘어간다.
+    # 그냥 두면 "이렇게 읽었습니다" 화면이 약 0개로 뜬다. 읽은 게 없는데
+    # 읽었다고 말하는 것이라 사용자는 뭘 해야 할지 모른다.
+    r = client.post("/confirm", data={"label1": "내과"})
+    assert r.status_code == 200
+    assert "골라주세요" in r.text, "빈 제출인데 안내가 없다"
+    assert "이렇게 읽었습니다" not in r.text, "읽은 게 없는데 읽었다고 말한다"
+
+
+def test_목록에서_안_골라도_친_글자는_확인_화면까지_간다(client):
+    # 자바스크립트가 제출 시 env{i} 로 옮긴다. 그 경로가 죽으면
+    # 사용자가 적은 약이 조용히 사라진다.
+    r = client.post("/confirm", data={"env1": "에어탈"})
+    assert r.status_code == 200
+    assert "에어탈" in r.text

@@ -301,6 +301,15 @@ async def confirm(request: Request):
     with t.stage("matching"):
         envelopes = await asyncio.to_thread(build)
 
+    # 아무것도 안 적고 제출한 경우. 그냥 두면 "이렇게 읽었습니다" 화면이
+    # 약 0개로 뜬다. 읽은 게 없는데 읽었다고 말하는 막다른 길이다.
+    # 자동완성 목록에서 클릭해야 품목이 정해지는데, 타이핑하는 사람은
+    # 이름을 다 치고 엔터를 누르는 습관이 있어 이 경로로 쉽게 빠진다.
+    if not envelopes:
+        return tpl.TemplateResponse(request, "index.html", {
+            "symptoms": engine.SYMPTOMS, "version": STATE["version"],
+            "error": "약 이름을 적고 아래 목록에서 골라주세요."})
+
     t.emit("confirm", envelopes=len(envelopes))
     return tpl.TemplateResponse(request, "confirm.html", {
         "envelopes": envelopes,
