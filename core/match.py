@@ -413,35 +413,51 @@ resolve.cache_info = _resolve_cached.cache_info
 
 
 def search_all(query: str, limit: int = 6):
-    """자동완성용. 1단(DUR)과 2단(허가목록)을 합쳐서 보여준다.
+    """자동완성용. 1단(DUR)과 2단(허가목록)을 합쳐 점수순으로 돌려준다.
 
     search() 는 1단만 본다. 그래서 바난정 같은 2단 전용 품목(27,113건)이
     자동완성에 아예 안 뜬다. 사용자는 봉투에 인쇄된 이름을 치는데 목록에
     없으면 직접 입력을 포기한다.
 
-    1단을 앞에 둔다. 상호작용 판정이 되는 쪽이라 먼저 보여야 한다.
-    2단은 dur_covered=False 로 내려가고, 화면이 "이름만 확인" 이라고
-    말한다. 판정을 못 하는 것과 목록에서 지우는 것은 다르다.
+    2단은 "1단이 모자랄 때만" 이 아니라 항상 돈다. 개수로 걸면 안 된다 —
+    1단은 score_cutoff=50 이라 쓰레기로도 limit 이 거의 항상 차고, 그러면
+    2단 코드가 실행되지 않는다. 실물 인쇄명으로 이렇게 났다.
+
+        액티피드시럽   정답 없음, 1위 큐피시럽
+        위피드정      정답 없음, 1위 피드로정
+        에리우스정    정답 없음, 1위 에이리스정
+
+    대신 2단에 1단 꼴찌 점수를 문턱으로 넘긴다. 그보다 낮은 점수는 합쳐도
+    상위 limit 에 못 드니 결과가 안 바뀌고, rapidfuzz 가 내부에서 가지친다.
+    1단이 강하면 거의 공짜고 1단이 약할 때만 제값을 낸다 — 2단이 필요한
+    경우가 정확히 그때다.
+
+    병합은 점수순이다. 1단을 무조건 앞세우지 않는다. resolve() 가 이미
+    2단이 MARGIN 만큼 높으면 그쪽을 택한다(에리우스정 대 에이리스정).
+    자동완성만 반대로 동작하면 안 된다. 동점이면 정렬이 안정적이라
+    판정 가능한 1단이 앞에 남는다.
     """
     q = (query or "").strip()
     if len(q) < 2:
         return []
+
     out = search(q, limit)
-    if len(out) >= limit:
-        return out
+    floor = out[-1].confidence if len(out) >= limit else 0.0
 
     rows, dur = _permit(), _dur_seqs()
     seen = {m.item_seq for m in out}
-    for _, score, idx in _rank(q, _permit_names(), limit * 3):
+    extra = []
+    for _, score, idx in _rank(q, _permit_names(), limit * 3,
+                               min(100.0, max(50.0, floor * 100 - 0.5))):
         seq, name = rows[idx]
         if seq in dur or seq in seen:
             continue
         if not _long_enough(q, name):
             continue
         seen.add(seq)
-        out.append(Medication(item_seq=seq, product_name=name, otc="",
-                              ingredients=[], confidence=round(score / 100, 3),
-                              dur_covered=False))
-        if len(out) >= limit:
-            break
-    return out
+        extra.append(Medication(item_seq=seq, product_name=name, otc="",
+                                ingredients=[], confidence=round(score / 100, 3),
+                                dur_covered=False))
+    if not extra:
+        return out
+    return sorted(out + extra, key=lambda m: -m.confidence)[:limit]

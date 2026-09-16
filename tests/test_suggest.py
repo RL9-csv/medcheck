@@ -76,3 +76,31 @@ def test_같은_품목을_두_번_고르면_한_번만_들어간다(client):
     r = client.post("/confirm", data={"seq1": [s, s]})
     assert r.status_code == 200
     assert r.text.count('value="%s"' % s) <= 2   # 라디오 하나 + 히든 정도
+
+
+# --- 실물 약봉투에 인쇄된 이름 -----------------------------------------------
+#
+# 처음 구현은 2단 폴백을 개수로 걸었다.
+#     out = search(q, limit)
+#     if len(out) >= limit: return out
+# 1단은 score_cutoff=50 이라 쓰레기로도 limit 이 거의 항상 찬다. 그래서 2단
+# 코드가 실행되지 않았고, 아래 이름 전부가 후보 6개 안에 없었다. 사용자는
+# 봉투에 인쇄된 이름을 그대로 쳤는데 자기 약은 없고 그럴듯한 오답만 떴다.
+#
+#     액티피드시럽 -> 큐피시럽 / 위피드정 -> 피드로정 / 에리우스정 -> 에이리스정
+#
+# 당시 자체 검증은 통과했다. 하필 1단 후보가 1건뿐이라 우연히 폴백을 타던
+# 질의("바난")를 내가 골라서 확인했기 때문이다. 검증 입력을 스스로 고르면
+# 안 된다는 사례라 실물 이름을 그대로 박아둔다.
+PRINTED = [
+    "액티피드시럽", "위피드정", "애니크라정", "킨도라제정", "비오플250산",
+    "에리우스정", "레보프라이드", "비졸본정", "알게나정", "타스펜8시간이알서방정",
+]
+
+
+@pytest.mark.parametrize("printed", PRINTED)
+def test_봉투에_인쇄된_이름이_후보에_들어온다(client, printed):
+    hits = names(client.get("/suggest", params={"q": printed}))
+    head = printed[:4]
+    assert any(n.startswith(head) for n in hits), \
+        "%s 를 쳤는데 후보에 없다. 나온 것: %s" % (printed, hits)
