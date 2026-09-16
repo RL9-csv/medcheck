@@ -125,7 +125,7 @@ def test_한_번에_한_건씩만_돈다():
 
 def test_예상_대기가_길면_접수하지_않는다():
     async def _t():
-        q = Queue(slow, max_wait_sec=30)            # 사진 한 장 25초 가정
+        q = Queue(slow, max_wait_sec=60)            # 사진 한 장 55초 추정
         assert not q.full(1)
         q.submit(1)
         assert q.full(1), "줄이 길어졌는데 계속 받는다"
@@ -177,5 +177,28 @@ def test_끝난_직후에는_결과가_남아있다():
         await drain(q, j)
         assert q.get(j.id) is not None
         assert q.get(j.id).result == {"ok": None}
+
+    run(_t)
+
+
+# -- 6. 대기시간을 과소 약속하지 않는다 ---------------------------------------
+
+def test_대기시간_추정은_관측_상한_쪽이다():
+    # 흔한 쪽(20초)으로 잡았더니, 동시 4건이 전부 영수증형(129줄)일 때
+    # 네 번째에게 "75초" 라고 말하고 실제로는 175초가 걸렸다. 2분 거절선도
+    # 같이 뚫렸다. 덜 기다리면 기분이 좋고 더 기다리면 고장으로 보인다.
+    from core.jobs import SEC_PER_PHOTO
+    assert SEC_PER_PHOTO >= 55, "추정이 관측 상한보다 낮으면 과소 약속이 된다"
+
+
+def test_거절선이_실제_소요_기준으로_동작한다():
+    async def _t():
+        # 한 장 55초 추정, 상한 120초면 앞에 두 건까지만 받는다.
+        q = Queue(slow, max_wait_sec=120)
+        assert not q.full(1)
+        q.submit(1)
+        assert not q.full(1)
+        q.submit(1)
+        assert q.full(1), "실제로 3분을 기다릴 사람을 받고 있다"
 
     run(_t)

@@ -85,8 +85,15 @@
           return;
         }
         if (j.state === 'queued' && j.position > 0) {
+          // 단일 숫자로 약속하지 않는다. 걸리는 시간이 사진의 글자 줄 수에
+          // 비례하는데 줄 수는 읽어보기 전에 알 수 없다. 앞선 사람이 영수증을
+          // 올렸는지 약봉투를 올렸는지에 따라 세 배까지 갈린다.
+          var lo = Math.round(j.eta_sec / 55 * 20 / 10) * 10;
+          var hi = Math.round(j.eta_sec / 10) * 10;
           what.textContent = '앞에 ' + j.position + '명 있습니다';
-          hint.textContent = '약 ' + Math.ceil(j.eta_sec / 10) * 10 + '초 뒤에 시작합니다';
+          hint.textContent = lo >= 60
+            ? '약 ' + Math.round(lo / 60) + '~' + Math.round(hi / 60) + '분 뒤에 시작합니다'
+            : '약 ' + lo + '~' + hi + '초 뒤에 시작합니다';
         } else if (j.state === 'running') {
           what.textContent = '사진에서 글자를 읽고 있습니다';
         }

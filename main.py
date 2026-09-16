@@ -62,6 +62,22 @@ app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 tpl = Jinja2Templates(directory=str(ROOT / "templates"))
 
 
+@app.middleware("http")
+async def _headers(request: Request, call_next):
+    """접수번호가 URL 에 있다. 밖으로 새지 않게 막는다.
+
+    확인 화면이 cdn.tailwindcss.com 을 부르므로 외부 요청이 나가고 그때
+    Referer 에 현재 주소가 실린다. 요즘 브라우저 기본값
+    (strict-origin-when-cross-origin)은 경로를 빼고 보내지만, 그건 기본값에
+    기대는 것이다. 기본값이 다른 브라우저나 구버전에서는 접수번호가 통째로
+    나간다. 로그인이 없어 번호가 곧 열쇠라 확정해 둔다.
+    """
+    r = await call_next(request)
+    r.headers["Referrer-Policy"] = "no-referrer"
+    r.headers["X-Content-Type-Options"] = "nosniff"
+    return r
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
