@@ -156,3 +156,26 @@ def test_출처가_비어도_소견_문구가_터지지_않는다():
     from core.matrix import _where
     from core.model import Review
     assert _where(Review(), [1, 2]) == "서로 다른 약봉투에서"
+
+
+def test_사진이_너무_크면_그렇다고_말한다(client):
+    # 10MB 상한일 때 요즘 폰 사진이 넘으면 조용히 버리고 "사진을 한 장
+    # 이상 올려주세요" 가 떴다. 분명히 올린 사람이 안 올렸다는 말을 듣는다.
+    # 실제로 그렇게 걸렸다.
+    import main
+    big = b"\xff\xd8\xff" + b"0" * (main.MAX_BYTES + 1)
+    r = client.post("/upload", files={"photo1": ("big.jpg", big, "image/jpeg")},
+                    follow_redirects=False)
+    assert r.status_code == 200
+    assert "용량이 너무 큽니다" in r.text, "왜 안 됐는지 말하지 않는다"
+
+
+def test_상한_안쪽_사진은_접수된다(client):
+    import main
+    from pathlib import Path
+    png = Path("static/sample.png").read_bytes()
+    assert len(png) < main.MAX_BYTES
+    r = client.post("/upload", files={"photo1": ("a.png", png, "image/png")},
+                    follow_redirects=False)
+    assert r.status_code == 303, "정상 크기 사진이 접수되지 않았다"
+    assert r.headers["location"].startswith("/wait/")

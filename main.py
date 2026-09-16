@@ -96,7 +96,17 @@ def index(request: Request):
                                 {"symptoms": engine.SYMPTOMS})
 
 
-MAX_FILES, MAX_BYTES = 5, 10 * 1024 * 1024
+MAX_FILES = 5
+
+# 사진 한 장의 상한. 25MB 다.
+#
+# 10MB 였는데 요즘 폰 사진이 그걸 쉽게 넘는다. 넘으면 조용히 버리고
+# "사진을 한 장 이상 올려주세요" 가 떴다. 분명히 올린 사람이 안 올렸다는
+# 말을 듣는다. 실제로 그렇게 걸렸다.
+#
+# 메모리는 문제가 아니다. 받자마자 _shrink 로 1280px 로 줄이므로 원본
+# 크기는 잠깐만 들고 있는다.
+MAX_BYTES = 25 * 1024 * 1024
 
 # 무거운 요청(OCR+매칭)을 한 번에 몇 건까지 받을지. 1 이다.
 #
@@ -218,21 +228,28 @@ async def upload(request: Request):
 
     # 슬롯 번호로 직접 읽는다. getlist 로 모으면 2번을 비웠을 때
     # 3번 사진이 label2 를 가져가 버린다.
-    images, labels = [], []
+    images, labels, too_big = [], [], False
     for i in range(1, MAX_FILES + 1):
         f = form.get(f"photo{i}")
         if not getattr(f, "filename", ""):
             continue
         blob = await f.read()
-        if not blob or len(blob) > MAX_BYTES:
+        if not blob:
+            continue
+        if len(blob) > MAX_BYTES:
+            too_big = True          # 조용히 버리지 않는다. 아래에서 말한다
             continue
         images.append(_shrink(blob))
         labels.append((form.get(f"label{i}") or "").strip())
 
     if not images:
+        # 올렸는데 안 올렸다고 하면 사용자는 자기가 뭘 잘못했는지 모른다.
+        # 파일이 없는 것과 너무 큰 것을 구분해서 말한다.
         return tpl.TemplateResponse(request, "index.html", {
             "symptoms": engine.SYMPTOMS, "version": STATE["version"],
-            "error": "사진을 한 장 이상 올려주세요."})
+            "error": ("사진 용량이 너무 큽니다. 한 장에 25MB 까지 됩니다. "
+                      "카메라 설정에서 화질을 낮추거나 다른 사진으로 "
+                      "올려주세요.") if too_big else "사진을 한 장 이상 올려주세요."})
 
     if QUEUE.full(len(images)):
         return tpl.TemplateResponse(request, "index.html", {

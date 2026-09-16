@@ -10,27 +10,46 @@
   <div class="card p-5">
     <div class="font-medium mb-1">약봉투를 찍어서 올려주세요</div>
     <p class="text-sm text-slate-500 mb-4">
-      병원이나 약국이 다르면 따로 올려주세요. 구겨져 있어도 괜찮으니, 손이 흔들리지 않게만 찍어주세요.
+      한 장만 올려도 됩니다. 병원이나 약국이 다르면 따로 올려주세요.
+      구겨져 있어도 괜찮으니, 손이 흔들리지 않게만 찍어주세요.
     </p>
 
-    {# 세 칸에 같은 예시를 쓰면 "왜 셋인가" 가 안 보인다. 서로 다른 곳에서
-       받은 약을 따로 올리라는 게 이 도구의 요점이라 예시도 달라야 한다. #}
+    {# 전에는 봉투 세 칸을 한꺼번에 펼쳐 뒀더니 "셋 다 채워야 하나" 로
+       읽혔다. 한 장만 올려도 되는 것이 기본이므로 첫 칸만 보이고 나머지는
+       필요할 때 꺼낸다.
+
+       파일 입력은 브라우저가 "파일 선택" 이라고 그린다. 폰에서는 실제로
+       카메라가 열리는데 문구가 그걸 안 말한다. 입력을 감추고 label 을
+       버튼처럼 만들어 "사진 촬영" 이라고 적는다. label 을 누르면 감춘
+       입력이 눌린다. #}
     {% set place = ['예: 내과', '예: 정형외과', '예: 약국'] %}
     {% for i in [1,2,3] %}
-    <div class="mb-3 pb-3 {% if not loop.last %}border-b border-slate-100{% endif %}">
+    <div class="slot {% if i > 1 %}hidden{% endif %} mb-3 pb-3
+                {% if not loop.last %}border-b border-slate-100{% endif %}"
+         data-slot="{{ i }}">
       <div class="flex items-center gap-2 mb-2">
         <span class="text-sm font-medium text-slate-700 w-14">봉투 {{ i }}</span>
         <input name="label{{ i }}" placeholder="이름 붙이기 (선택 · {{ place[loop.index0] }})"
                class="text-base px-2.5 py-1.5 border rounded-lg flex-1 max-w-52
                       focus:outline-none focus:ring-2 focus:ring-slate-300">
       </div>
-      <input type="file" name="photo{{ i }}" accept="image/*" capture="environment"
-             class="w-full text-sm text-slate-600
-                    file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0
-                    file:text-sm file:bg-slate-100 file:text-slate-700
-                    hover:file:bg-slate-200 file:cursor-pointer">
+
+      <input type="file" name="photo{{ i }}" id="photo{{ i }}"
+             accept="image/*" capture="environment" class="sr-only">
+      <label for="photo{{ i }}"
+             class="flex items-center justify-center gap-2 w-full py-3
+                    border-2 border-dashed border-slate-300 rounded-xl
+                    text-sm text-slate-600 cursor-pointer hover:bg-slate-50">
+        <span aria-hidden="true">＋</span>
+        <span class="pick-label">사진 촬영 · 앨범에서 고르기</span>
+      </label>
     </div>
     {% endfor %}
+
+    <button type="button" id="more"
+            class="text-sm text-slate-500 hover:text-slate-800">
+      + 다른 병원 약봉투 추가
+    </button>
   </div>
 
   {% include "_symptoms.html" %}
@@ -84,11 +103,45 @@
   // 없다. 흔한 쪽(약봉투)에 맞추고 영수증은 막대가 느려지며 버틴다.
   var SEC_PER_PHOTO = 25;
 
+  // 고른 사진이 붙었는지 화면에 보여준다. 파일 입력은 눌러도 아무 표시가
+  // 안 나서, 올렸다고 생각한 사람이 "사진을 올려주세요" 를 보게 된다.
+  document.querySelectorAll('input[type=file]').forEach(function (f) {
+    f.addEventListener('change', function () {
+      var lab = f.parentElement.querySelector('.pick-label');
+      var box = f.parentElement.querySelector('label');
+      if (f.files.length) {
+        var mb = (f.files[0].size / 1048576).toFixed(1);
+        lab.textContent = f.files[0].name + ' (' + mb + 'MB) · 다시 고르기';
+        box.classList.remove('border-dashed', 'border-slate-300');
+        box.classList.add('border-slate-800', 'bg-slate-50');
+      } else {
+        lab.textContent = '사진 촬영 · 앨범에서 고르기';
+        box.classList.add('border-dashed', 'border-slate-300');
+        box.classList.remove('border-slate-800', 'bg-slate-50');
+      }
+    });
+  });
+
+  // 봉투 칸은 필요할 때만 꺼낸다. 처음부터 셋을 펼치면 다 채워야 하는
+  // 것으로 읽힌다.
+  document.getElementById('more').addEventListener('click', function () {
+    var next = document.querySelector('.slot.hidden');
+    if (!next) { return; }
+    next.classList.remove('hidden');
+    if (!document.querySelector('.slot.hidden')) { this.classList.add('hidden'); }
+  });
+
   document.querySelector('form[action="/upload"]').addEventListener('submit', function () {
     var b = document.getElementById('go');
     var n = 0;
     document.querySelectorAll('input[type=file]').forEach(function (f) { if (f.files.length) n++; });
-    if (!n) { return; }
+    if (!n) {
+      // 막지 않는다. 서버가 안내를 그린다. 다만 그냥 넘기면 사용자는
+      // 버튼이 안 눌린 줄 안다.
+      b.textContent = '사진을 먼저 골라주세요';
+      setTimeout(function () { b.textContent = '사진에서 약 찾기'; }, 2000);
+      return;
+    }
     b.disabled = true;
     b.textContent = '읽는 중입니다';
     document.getElementById('wait').classList.remove('hidden');
