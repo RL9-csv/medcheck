@@ -284,6 +284,12 @@ async def confirm_job(request: Request, job_id: str):
     job = QUEUE.get(job_id, touch=True)
     if not job or job.state != "done":
         return RedirectResponse(f"/wait/{job_id}", status_code=303)
+    if job.result is None:
+        return tpl.TemplateResponse(request, "index.html", {
+            "symptoms": engine.SYMPTOMS, "version": STATE["version"],
+            "error": "사진에서 글자를 읽지 못했습니다. 더 밝은 곳에서 "
+                     "글자가 잘 보이게 다시 찍어주시거나, 아래에서 약 "
+                     "이름으로 찾아주세요."})
     return tpl.TemplateResponse(request, "confirm.html", job.result)
 
 
@@ -310,6 +316,20 @@ async def _do_upload(images, labels, symptoms, t):
 
     # 원본 이미지는 여기서 끝난다. 남기는 것은 화면에 그릴 내용뿐이다.
     images.clear()
+
+    # 모든 사진에서 한 줄도 못 읽었으면 확인 화면을 띄우지 않는다.
+    #
+    # 그냥 두면 "이렇게 읽었습니다. 맞는지 확인하고 고쳐주세요" 가 약 0개로
+    # 뜬다. 읽은 게 없는데 읽었다고 말하는 것이라 사용자는 뭘 해야 할지
+    # 모른다. 직접 입력 쪽에서 고친 것과 같은 모양이 사진 쪽에 남아 있었다.
+    #
+    # 여기로 오는 경로가 여럿이다. 아이폰 HEIC(변환 없이 올라오면 0줄),
+    # 깨진 파일, 너무 어두운 사진, 약봉투가 아닌 사진. 원인별로 나누지
+    # 않고 "못 읽었다 + 다음에 할 것" 하나로 덮는다. 사용자에게 필요한
+    # 것은 원인 분류가 아니라 다음 행동이다.
+    if not any(e["read"] for e in envelopes):
+        return None
+
     return {"envelopes": envelopes, "symptoms": symptoms,
             "symptom_defs": engine.SYMPTOMS, "trace": t.stages,
             "from_photo": True}

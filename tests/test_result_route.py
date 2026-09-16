@@ -130,3 +130,29 @@ def test_봉투가_다르면_같은_약도_따로_센다(client):
         "다른 봉투의 같은 약을 접었다. 중복 복용을 못 찾는다"
     assert anticholinergic(r.text) == 4, \
         "서로 다른 봉투의 같은 약은 합산되어야 한다"
+
+
+def test_글자를_하나도_못_읽으면_확인_화면을_안_띄운다(client):
+    # 그냥 두면 "이렇게 읽었습니다. 맞는지 확인하고 고쳐주세요" 가 약 0개로
+    # 뜬다. 읽은 게 없는데 읽었다고 말하는 것이다. 아이폰 HEIC, 깨진 파일,
+    # 너무 어두운 사진, 약봉투가 아닌 사진이 전부 여기로 온다.
+    import main
+    from core.jobs import Job
+
+    job = Job(1)
+    job.state, job.result = "done", None      # OCR 0줄
+    main.QUEUE._jobs[job.id] = job
+    try:
+        r = client.get("/confirm/%s" % job.id)
+        assert r.status_code == 200
+        assert "글자를 읽지 못했습니다" in r.text, "못 읽었다는 말을 안 한다"
+        assert "이렇게 읽었습니다" not in r.text
+    finally:
+        main.QUEUE._jobs.pop(job.id, None)
+
+
+def test_출처가_비어도_소견_문구가_터지지_않는다():
+    # matrix._where 의 all([]) 은 빈 목록을 통과시키고 names[0] 에서 터진다.
+    from core.matrix import _where
+    from core.model import Review
+    assert _where(Review(), [1, 2]) == "서로 다른 약봉투에서"

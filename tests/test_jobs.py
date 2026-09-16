@@ -202,3 +202,52 @@ def test_거절선이_실제_소요_기준으로_동작한다():
         assert q.full(1), "실제로 3분을 기다릴 사람을 받고 있다"
 
     run(_t)
+
+
+# -- 7. 멈춘 작업이 큐를 영원히 막지 않는다 -----------------------------------
+
+def test_멈춘_작업은_상한에서_끊긴다():
+    # 예외가 터지는 경우는 _run 이 받아낸다. 문제는 던지지 않고 그냥 멈추는
+    # 경우다. 작업자가 하나뿐이라 그 한 건이 큐를 영원히 막는다. 컨테이너는
+    # 살아 있으니 재시작 정책도 안 걸리고 아무도 모른다.
+    async def _t():
+        async def hang(x=None):
+            await asyncio.sleep(30)
+
+        import core.jobs as J
+        old, J.TIMEOUT = J.TIMEOUT, 0.2
+        try:
+            q = Queue(hang)
+            j = q.submit(1)
+            await drain(q, j, limit=3.0)
+            assert j.state == "error", "멈춘 작업이 안 끊겼다"
+            assert j.error == "Timeout"
+        finally:
+            J.TIMEOUT = old
+
+    run(_t)
+
+
+def test_멈춘_작업_뒤에_기다리던_사람은_처리된다():
+    async def _t():
+        calls = []
+
+        async def first_hangs(x=None):
+            calls.append(1)
+            if len(calls) == 1:
+                await asyncio.sleep(30)    # 첫 건만 멈춘다
+            return {"ok": True}
+
+        import core.jobs as J
+        old, J.TIMEOUT = J.TIMEOUT, 0.2
+        try:
+            q = Queue(first_hangs)
+            stuck = q.submit(1)
+            after = q.submit(1)
+            await drain(q, after, limit=5.0)
+            assert stuck.state == "error"
+            assert after.state == "done", "앞사람이 멈춰서 뒷사람이 막혔다"
+        finally:
+            J.TIMEOUT = old
+
+    run(_t)

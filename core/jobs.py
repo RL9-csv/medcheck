@@ -26,11 +26,27 @@ dict 를 보게 되어 접수번호가 "없는 번호" 가 된다. Dockerfile �
 원본 이미지는 여기 남기지 않는다. 읽기가 끝나면 즉시 버리고 결과만 남긴다.
 """
 import asyncio
+import os
 import secrets
 import time
 
 TTL = 15 * 60        # 결과를 들고 있는 시간(초)
 ABANDON = 60         # 이 시간 동안 안 물어보면 버려진 것으로 본다
+
+# 작업 하나에 걸어두는 상한(초).
+#
+# 예외가 터지는 경우는 아래 _run 이 받아낸다. 문제는 던지지 않고 그냥
+# 멈추는 경우다. 작업자가 하나뿐이라 그 한 건이 큐를 영원히 막는다.
+# 컨테이너는 살아 있으니 재시작 정책도 안 걸리고, 사람이 볼 때까지
+# 아무도 모른다.
+#
+# 알림은 사람이 깨어 있어야 듣지만 상한은 밤에도 스스로 푼다. 그래서
+# 알림보다 이쪽이 먼저다.
+#
+# 180초는 관측 최대(영수증 한 장 58초, 다섯 장이면 290초)가 아니라
+# 현실적인 상한이다. 사진 다섯 장을 한 번에 올리는 경우는 그 전에
+# 대기시간 거절에 걸린다.
+TIMEOUT = int(os.environ.get("JOB_TIMEOUT", "180"))
 # 대기시간 추정용. 흔한 쪽(20초)이 아니라 관측 상한(58초) 쪽으로 잡는다.
 #
 # 25로 잡았더니 동시 4건이 전부 영수증형(129줄)일 때 네 번째에게 "75초"
@@ -150,8 +166,13 @@ class Queue:
                     return
                 job.state = "running"
                 job.started = time.time()
-                job.result = await self._worker(*args, **kwargs)
+                job.result = await asyncio.wait_for(
+                    self._worker(*args, **kwargs), timeout=TIMEOUT)
                 job.state = "done"
+        except asyncio.TimeoutError:
+            # 멈춘 작업을 놓아준다. 뒤에 기다리는 사람이 있다.
+            job.state = "error"
+            job.error = "Timeout"
         except Exception as e:
             # 실패해도 접수번호는 살려둔다. 대기 화면이 "실패했다" 를
             # 말할 수 있어야 한다. 조용히 사라지면 사용자는 영원히 기다린다.

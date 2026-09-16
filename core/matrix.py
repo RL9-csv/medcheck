@@ -30,7 +30,10 @@ def build_matrix(review: Review):
 def _where(review: Review, indices: list[int]) -> str:
     """출처를 어떻게 부를지 결정한다. 이름이 없으면 승격하지 않는다."""
     srcs = [s for s in review.sources if s.index in indices]
-    if not all(s.named for s in srcs):
+    # all([]) 은 True 라 빈 목록이 그대로 통과하고 아래 names[0] 에서 터진다.
+    # 지금은 findings 에서 나온 indices 로만 불려 빈 경우가 안 생기지만,
+    # 호출자가 하나 늘면 조용히 깨진다. 여기서 막는다.
+    if not srcs or not all(s.named for s in srcs):
         return "서로 다른 약봉투에서"
     names = [s.label for s in srcs]
     if len(names) == 1:
