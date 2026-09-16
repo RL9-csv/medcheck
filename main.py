@@ -252,6 +252,27 @@ async def _do_upload(request, images, labels, form, t):
         "symptom_defs": engine.SYMPTOMS, "trace": t.stages, "from_photo": True})
 
 
+@app.get("/suggest")
+async def suggest(q: str = "", limit: int = 6):
+    """직접 입력 칸의 자동완성. 품목코드까지 같이 내려준다.
+
+    사용자가 친 글자가 아니라 여기서 고른 품목코드가 넘어간다. 그래야
+    오탈자가 원천적으로 안 생기고 "100mg" 과 "100밀리그램" 이 갈리지
+    않는다. 봉투에 인쇄된 용량 표기와 허가 등재명의 표기가 다른 것이
+    직접 입력에서 제일 흔한 실패였다.
+
+    무거운 업로드와 달리 세마포어를 걸지 않는다. 타자 한 번에 한 번씩
+    불리므로 막으면 입력이 끊긴다. 매칭은 이미 캐시가 받쳐준다.
+    """
+    q = (q or "").strip()
+    if len(q) < 2:
+        return JSONResponse([])
+    limit = max(1, min(limit, 10))
+    hits = await asyncio.to_thread(match.search_all, q, limit)
+    return JSONResponse([{"seq": m.item_seq, "name": m.product_name,
+                          "otc": m.otc, "dur": m.dur_covered} for m in hits])
+
+
 @app.post("/confirm", response_class=HTMLResponse)
 async def confirm(request: Request):
     """봉투별 입력 -> 후보 제시. 사람이 고르기 전에는 판정하지 않는다."""
@@ -261,11 +282,20 @@ async def confirm(request: Request):
     def build():
         out = []
         for i in range(1, 6):
+            # 자동완성에서 고른 것. 이미 품목이 정해졌으므로 다시 찾지 않는다.
+            picked = [v for v in form.getlist(f"seq{i}") if v]
             raw = (form.get(f"env{i}") or "").strip()
-            if not raw:
-                continue
             lines = [x.strip() for x in raw.splitlines() if x.strip()]
-            out.append(_envelope(i, form.get(f"label{i}") or "", lines, t))
+            if not picked and not lines:
+                continue
+            env = _envelope(i, form.get(f"label{i}") or "", lines, t)
+            if picked:
+                chosen = _load_meds(list(dict.fromkeys(picked)))
+                t.count("picked", len(chosen))
+                env["items"] = [{"query": m.product_name, "status": "auto",
+                                 "auto": m, "candidates": [m]}
+                                for m in chosen] + env["items"]
+            out.append(env)
         return out
 
     with t.stage("matching"):

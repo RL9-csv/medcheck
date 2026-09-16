@@ -410,3 +410,38 @@ def resolve(query: str):
 
 resolve.cache_clear = _resolve_cached.cache_clear
 resolve.cache_info = _resolve_cached.cache_info
+
+
+def search_all(query: str, limit: int = 6):
+    """자동완성용. 1단(DUR)과 2단(허가목록)을 합쳐서 보여준다.
+
+    search() 는 1단만 본다. 그래서 바난정 같은 2단 전용 품목(27,113건)이
+    자동완성에 아예 안 뜬다. 사용자는 봉투에 인쇄된 이름을 치는데 목록에
+    없으면 직접 입력을 포기한다.
+
+    1단을 앞에 둔다. 상호작용 판정이 되는 쪽이라 먼저 보여야 한다.
+    2단은 dur_covered=False 로 내려가고, 화면이 "이름만 확인" 이라고
+    말한다. 판정을 못 하는 것과 목록에서 지우는 것은 다르다.
+    """
+    q = (query or "").strip()
+    if len(q) < 2:
+        return []
+    out = search(q, limit)
+    if len(out) >= limit:
+        return out
+
+    rows, dur = _permit(), _dur_seqs()
+    seen = {m.item_seq for m in out}
+    for _, score, idx in _rank(q, _permit_names(), limit * 3):
+        seq, name = rows[idx]
+        if seq in dur or seq in seen:
+            continue
+        if not _long_enough(q, name):
+            continue
+        seen.add(seq)
+        out.append(Medication(item_seq=seq, product_name=name, otc="",
+                              ingredients=[], confidence=round(score / 100, 3),
+                              dur_covered=False))
+        if len(out) >= limit:
+            break
+    return out
