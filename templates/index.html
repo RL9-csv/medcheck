@@ -177,10 +177,21 @@
 
 {# 직접 입력은 사진의 대체 경로가 아니라 동등한 경로다. details 안에 숨겨
    두었더니 사진이 안 되는 사람이 여기까지 못 왔다. #}
-<div class="mt-8 pt-6 border-t border-slate-200">
+{# 한 화면에 제출 버튼이 둘이다. 사진을 올린 사람이 아래로 내려와
+   "확인하기" 를 누르는 일이 실제로 있었다. 두 경로가 다르다는 것을
+   화면에서 먼저 말하고, 눌렀을 때도 한 번 더 잡는다. #}
+<div class="my-8 flex items-center gap-3">
+  <div class="flex-1 border-t border-slate-200"></div>
+  <span class="text-sm text-slate-400">또는</span>
+  <div class="flex-1 border-t border-slate-200"></div>
+</div>
+
+<div>
   <div class="text-sm font-medium text-slate-700 mb-1">사진 없이 약 이름으로 찾기</div>
   <p class="text-sm text-slate-500 mb-4">
-    봉투가 없거나 글씨가 흐릿하면 이름으로 찾으시면 됩니다. 두 글자만 쳐도 목록이 나옵니다.
+    <span class="font-medium text-slate-700">사진을 올리셨다면 여기는 비워두세요.</span>
+    위의 <span class="font-medium">사진에서 약 찾기</span> 를 누르시면 됩니다.
+    봉투가 없거나 글씨가 흐릿할 때만 아래에 이름을 적어주세요.
   </p>
 
   <form method="post" action="/confirm" class="space-y-5">
@@ -234,8 +245,9 @@
 
     {% include "_symptoms.html" %}
 
-    <button class="w-full bg-slate-700 text-white rounded-xl py-3.5 font-medium hover:bg-slate-600">
-      확인하기
+    <button id="godirect"
+            class="w-full bg-slate-700 text-white rounded-xl py-3.5 font-medium hover:bg-slate-600">
+      적은 약 이름으로 확인하기
     </button>
   </form>
 </div>
@@ -327,7 +339,33 @@
   // 목록에서 안 고르고 그냥 친 것도 버리지 않는다. 기존 경로로 보내면
   // 확인 화면이 비슷한 후보를 찾아 보여준다. 고른 것만 받고 나머지를
   // 조용히 버리면 사용자는 자기가 적은 약이 어디 갔는지 모른다.
-  box.addEventListener('submit', function () {
+  // 사진을 올려놓고 이쪽 버튼을 누르는 일이 실제로 있었다. 화면에 제출
+  // 버튼이 둘이고, 사진 칸은 위에 있는데 이 버튼이 아래에 있어서다.
+  // 문구로 갈라놓았지만 눌렀을 때도 한 번 더 잡는다. 그냥 보내면
+  // "약 이름을 적고 목록에서 골라주세요" 가 떠서, 사진을 올린 사람이
+  // 자기가 뭘 잘못했는지 모른다.
+  box.addEventListener('submit', function (e) {
+    var hasPhoto = false;
+    document.querySelectorAll('input[type=file]').forEach(function (f) {
+      if (f.files.length) { hasPhoto = true; }
+    });
+    var hasDrug = false;
+    box.querySelectorAll('[data-role=drug]').forEach(function (x) {
+      if (x.value.trim()) { hasDrug = true; }
+    });
+    if (hasPhoto && !hasDrug) {
+      e.preventDefault();
+      var go = document.getElementById('go');
+      go.scrollIntoView({behavior: 'smooth', block: 'center'});
+      go.classList.add('ring-4', 'ring-amber-300');
+      var d = document.getElementById('godirect');
+      d.textContent = '사진은 위의 버튼으로 찾습니다';
+      setTimeout(function () {
+        d.textContent = '적은 약 이름으로 확인하기';
+        go.classList.remove('ring-4', 'ring-amber-300');
+      }, 4000);
+      return;
+    }
     box.querySelectorAll('.rows').forEach(function (rows) {
       var i = rows.dataset.env, free = [];
       rows.querySelectorAll('.row').forEach(function (row) {

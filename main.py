@@ -408,7 +408,9 @@ async def confirm(request: Request):
     if not envelopes:
         return tpl.TemplateResponse(request, "index.html", {
             "symptoms": engine.SYMPTOMS, "version": STATE["version"],
-            "error": "약 이름을 적고 아래 목록에서 골라주세요."})
+            "error": "사진으로 찾으시려면 위의 '사진에서 약 찾기' 를 "
+                     "눌러주세요. 이름으로 찾으시려면 아래에 약 이름을 "
+                     "적고 목록에서 골라주세요."})
 
     t.emit("confirm", envelopes=len(envelopes))
     return tpl.TemplateResponse(request, "confirm.html", {
