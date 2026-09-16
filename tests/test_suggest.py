@@ -115,7 +115,7 @@ def test_아무것도_안_고르고_제출하면_막다른_길로_안_간다(cli
     r = client.post("/confirm", data={"label1": "내과"})
     assert r.status_code == 200
     assert "골라주세요" in r.text, "빈 제출인데 안내가 없다"
-    assert "사진에서 약 찾기" in r.text, "사진 경로를 안내하지 않는다"
+    assert "사진으로 찾기" in r.text, "사진 경로를 안내하지 않는다"
     assert "이렇게 읽었습니다" not in r.text, "읽은 게 없는데 읽었다고 말한다"
 
 

@@ -86,7 +86,7 @@
   <button id="go"
           class="w-full bg-slate-900 text-white rounded-xl py-3.5 font-medium hover:bg-slate-800
                  disabled:bg-slate-400 disabled:cursor-wait">
-    사진에서 약 찾기
+    약봉투 읽기
   </button>
 </form>
 
@@ -160,7 +160,7 @@
       // 막지 않는다. 서버가 안내를 그린다. 다만 그냥 넘기면 사용자는
       // 버튼이 안 눌린 줄 안다.
       b.textContent = '사진을 먼저 골라주세요';
-      setTimeout(function () { b.textContent = '사진에서 약 찾기'; }, 2000);
+      setTimeout(function () { b.textContent = '약봉투 읽기'; }, 2000);
       return;
     }
     b.disabled = true;
@@ -257,7 +257,7 @@
 
     <button id="godirect"
             class="w-full bg-slate-700 text-white rounded-xl py-3.5 font-medium hover:bg-slate-600">
-      적은 약 이름으로 확인하기
+      적은 약 확인하기
     </button>
   </form>
 </div>
