@@ -9,13 +9,14 @@
 import asyncio, os, sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 from core import match, engine, lines as lines_mod, ocr, polish
+from core.jobs import Queue
 from core.model import Review, Source
 from core.matrix import build_matrix
 from core.telemetry import Trace
@@ -92,11 +93,13 @@ MAX_FILES, MAX_BYTES = 5, 10 * 1024 * 1024
 #   동시 3   3건 / 72.0s = 0.042 req/s
 #
 # 처리량이 평평하다. 동시 실행을 허용해도 초당 처리량은 그대로고 모든
-# 사용자의 대기시간만 3배가 된다. 그래서 기다리게 하지 않고 즉시
-# 503 + Retry-After 로 돌려보낸다. 24s 는 "느리다" 지만 72s 는
-# "고장났다" 로 보인다.
-HEAVY = asyncio.Semaphore(int(os.environ.get("MAX_CONCURRENT", "1")))
+# 사용자의 대기시간만 3배가 된다. 그래서 병렬로 돌리지 않고 줄을 세운다.
 RETRY_AFTER = os.environ.get("RETRY_AFTER", "24")   # 실측 단건 소요시간
+
+# 접수번호로 받고 뒤에서 한 건씩 처리한다. 동시 실행이 1인 이유는 위와 같다.
+# 넘치면 대기시간으로 거절한다. core/jobs.py 참고.
+QUEUE = Queue(lambda *a: _do_upload(*a),
+              max_wait_sec=int(os.environ.get("MAX_WAIT_SEC", "120")))
 
 
 def _envelope(index, label, lines, trace, drop_none=False):
@@ -215,18 +218,60 @@ async def upload(request: Request):
             "symptoms": engine.SYMPTOMS, "version": STATE["version"],
             "error": "사진을 한 장 이상 올려주세요."})
 
-    if HEAVY.locked():
+    if QUEUE.full(len(images)):
         return tpl.TemplateResponse(request, "index.html", {
             "symptoms": engine.SYMPTOMS, "version": STATE["version"],
-            "error": f"지금 다른 사진을 읽고 있습니다. "
-                     f"{RETRY_AFTER}초 뒤에 다시 눌러 주세요."},
+            "error": f"지금 앞에 {QUEUE.eta_sec() // 60 + 1}분쯤 밀려 있습니다. "
+                     f"잠시 뒤에 다시 눌러 주세요."},
             status_code=503, headers={"Retry-After": RETRY_AFTER})
 
-    async with HEAVY:
-        return await _do_upload(request, images, labels, form, t)
+    # 여기서 기다리지 않는다. 접수번호만 주고 끊는다.
+    #
+    # 전에는 이 자리에서 20~58초를 붙잡고 있었다. 폰 화면이 꺼지면 연결이
+    # 끊기고 서버가 한 일이 전부 버려졌다. 약국 앞에서 폰으로 찍는 사람이
+    # 대상이라 그 상황이 예외가 아니라 기본이다.
+    job = QUEUE.submit(len(images), images, labels,
+                       form.getlist("symptom"), t)
+    return RedirectResponse(f"/wait/{job.id}", status_code=303)
 
 
-async def _do_upload(request, images, labels, form, t):
+@app.get("/wait/{job_id}", response_class=HTMLResponse)
+async def wait(request: Request, job_id: str):
+    job = QUEUE.get(job_id, touch=True)
+    if not job:
+        return tpl.TemplateResponse(request, "index.html", {
+            "symptoms": engine.SYMPTOMS, "version": STATE["version"],
+            "error": "결과를 찾지 못했습니다. 사진을 다시 올려주세요."},
+            status_code=404)
+    if job.state == "done":
+        return RedirectResponse(f"/confirm/{job.id}", status_code=303)
+    return tpl.TemplateResponse(request, "wait.html",
+                                {"job": job, "eta": QUEUE.eta_sec(job.id)})
+
+
+@app.get("/job/{job_id}")
+async def job_state(job_id: str):
+    """대기 화면이 물어보는 곳. 가볍게 유지한다.
+
+    이 요청이 살아있음 신호를 겸한다. 탭을 닫으면 신호가 끊기고, 아직
+    차례가 안 온 작업은 줄에서 빠진다.
+    """
+    job = QUEUE.get(job_id, touch=True)
+    if not job:
+        return JSONResponse({"state": "expired"}, status_code=404)
+    return {"state": job.state, "elapsed_ms": job.elapsed_ms(),
+            "position": QUEUE.position(job.id), "eta_sec": QUEUE.eta_sec(job.id)}
+
+
+@app.get("/confirm/{job_id}", response_class=HTMLResponse)
+async def confirm_job(request: Request, job_id: str):
+    job = QUEUE.get(job_id, touch=True)
+    if not job or job.state != "done":
+        return RedirectResponse(f"/wait/{job_id}", status_code=303)
+    return tpl.TemplateResponse(request, "confirm.html", job.result)
+
+
+async def _do_upload(images, labels, symptoms, t):
     with t.stage("ocr"):
         pages = await ocr.read_many(ocr.get_engine(), images)
 
@@ -247,9 +292,11 @@ async def _do_upload(request, images, labels, form, t):
     t.emit("upload", engine=ocr.get_engine().name,
            bytes_total=sum(len(b) for b in images))
 
-    return tpl.TemplateResponse(request, "confirm.html", {
-        "envelopes": envelopes, "symptoms": form.getlist("symptom"),
-        "symptom_defs": engine.SYMPTOMS, "trace": t.stages, "from_photo": True})
+    # 원본 이미지는 여기서 끝난다. 남기는 것은 화면에 그릴 내용뿐이다.
+    images.clear()
+    return {"envelopes": envelopes, "symptoms": symptoms,
+            "symptom_defs": engine.SYMPTOMS, "trace": t.stages,
+            "from_photo": True}
 
 
 @app.get("/suggest")
