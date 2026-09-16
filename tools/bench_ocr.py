@@ -45,10 +45,25 @@ FONT_BD = "C:/Windows/Fonts/malgunbd.ttf"
 LAYOUTS = ("basic", "boxed", "twocol")
 
 
-def pick_drugs(rng, k):
-    """실제 품목 사전에서 뽑는다. 이름 길이·괄호·숫자가 골고루 섞이도록."""
-    names = [r[1] for r in match._catalog()]
-    return rng.sample(names, k)
+OUTSIDE: list[str] = []      # 카탈로그에 없는 실제 제품명. --outside 로 채운다.
+
+
+def pick_drugs(rng, k, n_outside=0):
+    """실제 품목 사전에서 뽑는다. 이름 길이·괄호·숫자가 골고루 섞이도록.
+
+    n_outside 만큼은 카탈로그에 없는 실제 제품명으로 바꿔 넣는다.
+    카탈로그에서만 뽑으면 "없는 약이 비슷한 약으로 확정되는" 실패를 원리적으로
+    볼 수 없다. 실제 약봉투의 약 3분의 1이 DUR 카탈로그에 없다는 것이 실측됐으니,
+    그 실패를 안 재는 벤치는 false_accept 를 과소평가한다.
+    """
+    # 카탈로그에 앞뒤 공백·개행이 붙은 품목명이 158건 있다(같은 품목이 테이블마다
+    # 다르게 들어옴). 여기서 안 걷으면 맞게 확정한 것을 틀렸다고 센다. 실제로 그랬다.
+    names = sorted({r[1].strip() for r in match._catalog()})
+    picked = rng.sample(names, k - n_outside)
+    if n_outside:
+        picked += rng.sample(OUTSIDE, n_outside)
+        rng.shuffle(picked)
+    return picked
 
 
 def make_envelope(drugs, layout, rng, size=(900, 1200)):
@@ -132,17 +147,22 @@ def to_png(img):
     return b.getvalue()
 
 
-def score(read_lines, truth, use_filter):
+WRONG_LOG: list[tuple] = []     # (조건, 레벨, 읽은 줄, 확정된 약, 정답 목록). 개수만 남기면 원인을 못 본다.
+
+
+def score(read_lines, truth, use_filter, tag=("", 0)):
     """읽은 줄 -> (recall, false_accept, suggest, noise_suggest)."""
     queries, _ = L.filter_lines(read_lines) if use_filter else (list(read_lines), 0)
     hit, wrong, sug, noise_sug = set(), 0, 0, 0
     for q in queries:
         med, cands, st = match.resolve(q)
         if st == "auto":
-            if med.product_name in truth:
+            if med.product_name.strip() in truth:
                 hit.add(med.product_name)
             else:
                 wrong += 1
+                if use_filter:
+                    WRONG_LOG.append((*tag, q, med.product_name, sorted(truth)))
         elif st == "suggest":
             sug += 1
             # 정답 후보가 하나도 없는 제안 = 화면을 덮는 잡음
@@ -158,50 +178,96 @@ def main():
     ap.add_argument("--levels", type=int, default=3)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default=str(ROOT / "reports" / "ocr_bench.csv"))
+    ap.add_argument("--outside", default="", help="카탈로그 밖 실제 제품명 목록 파일(한 줄에 하나)")
+    ap.add_argument("--n-outside", type=int, default=0, help="봉투당 카탈로그 밖 약 개수")
+    ap.add_argument("--one", nargs=2, metavar=("DEG", "LV"), default=None,
+                    help="(내부용) 조건 하나만 돌리고 CSV 에 한 줄 덧붙인다")
+    ap.add_argument("--no-split", action="store_true", help="프로세스 분할 없이 한 번에 돈다(메모리 주의)")
     a = ap.parse_args()
 
     rng = random.Random(a.seed)
-    engine = ocr.get_engine()
-    ocr.warmup(engine)
+    if a.outside:
+        OUTSIDE[:] = [l.strip() for l in io.open(a.outside, encoding="utf-8") if l.strip()]
+        if a.one is None:
+            print(f"카탈로그 밖 이름 {len(OUTSIDE)}건 · 봉투당 {a.n_outside}개 섞음", flush=True)
 
+    # 봉투는 seed 로 결정되므로 부모와 자식이 같은 봉투를 그린다.
     sheets = []
     for layout in LAYOUTS:
         for _ in range(a.n):
-            drugs = pick_drugs(rng, a.drugs)
+            drugs = pick_drugs(rng, a.drugs, a.n_outside)
             sheets.append((layout, drugs, make_envelope(drugs, layout, rng)))
 
-    rows = []
-    for name, fn in DEGS.items():
-        for lv in range(0, a.levels + 1):
-            if name == "none" and lv > 0:
-                continue
-            acc = {k: [] for k in ("recall_f", "recall_r", "wrong_f", "wrong_r",
-                                   "sug_f", "sug_r", "noise_f", "noise_r", "nlines")}
-            for layout, drugs, img in sheets:
-                read = [l.text for l in engine.read(to_png(fn(img, lv)))]
-                truth = set(drugs)
-                r, w, s, ns = score(read, truth, True)
-                acc["recall_f"].append(r); acc["wrong_f"].append(w)
-                acc["sug_f"].append(s); acc["noise_f"].append(ns)
-                r, w, s, ns = score(read, truth, False)
-                acc["recall_r"].append(r); acc["wrong_r"].append(w)
-                acc["sug_r"].append(s); acc["noise_r"].append(ns)
-                acc["nlines"].append(len(read))
-            row = {"deg": name, "level": lv, "sheets": len(sheets)}
-            row.update({k: round(float(np.mean(v)), 3) for k, v in acc.items()})
-            rows.append(row)
-            print(f"{name:8s} lv{lv}  recall {row['recall_f']:.2f}(filter) "
-                  f"{row['recall_r']:.2f}(raw)  false_accept {row['wrong_f']:.2f}/"
-                  f"{row['wrong_r']:.2f}  noise_suggest {row['noise_f']:.2f}/{row['noise_r']:.2f}",
-                  flush=True)
-
+    conds = [(name, lv) for name in DEGS for lv in range(0, a.levels + 1)
+             if not (name == "none" and lv > 0)]
     out = Path(a.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    with out.open("w", newline="", encoding="utf-8") as fh:
-        wcsv = csv.DictWriter(fh, fieldnames=list(rows[0]))
-        wcsv.writeheader()
+    fields = ["deg", "level", "sheets", "recall_f", "recall_r", "wrong_f", "wrong_r",
+              "sug_f", "sug_r", "noise_f", "noise_r", "nlines"]
+
+    # ---- 드라이버: 조건마다 자식 프로세스. PaddleOCR 이 메모리를 놓지 않아 한 프로세스에서
+    # 300회를 넘기면 통째로 죽는다(실제로 두 번 죽었다). 자식이 끝나면 OS 가 전부 회수한다.
+    if a.one is None and not a.no_split:
+        import subprocess
+        if out.exists():
+            out.unlink()
+        wl = out.with_name(out.stem + "_wrong.txt")
+        if wl.exists():
+            wl.unlink()
+        base = [sys.executable, __file__, "--n", str(a.n), "--drugs", str(a.drugs),
+                "--levels", str(a.levels), "--seed", str(a.seed), "--out", str(out),
+                "--n-outside", str(a.n_outside)]
+        if a.outside:
+            base += ["--outside", a.outside]
+        for name, lv in conds:
+            r = subprocess.run(base + ["--one", name, str(lv)])
+            if r.returncode != 0:
+                print(f"{name} lv{lv}  !! 자식 프로세스 실패 (exit {r.returncode})", flush=True)
+        print("wrote", out)
+        return
+
+    # ---- 작업자: 조건 하나(또는 --no-split 이면 전부)
+    engine = ocr.get_engine()
+    ocr.warmup(engine)
+    todo = [(a.one[0], int(a.one[1]))] if a.one else conds
+    rows = []
+    for name, lv in todo:
+        fn = DEGS[name]
+        acc = {k: [] for k in ("recall_f", "recall_r", "wrong_f", "wrong_r",
+                               "sug_f", "sug_r", "noise_f", "noise_r", "nlines")}
+        for layout, drugs, img in sheets:
+            read = [l.text for l in engine.read(to_png(fn(img, lv)))]
+            truth = set(drugs)
+            r, w, s_, ns = score(read, truth, True, (name, lv))
+            acc["recall_f"].append(r); acc["wrong_f"].append(w)
+            acc["sug_f"].append(s_); acc["noise_f"].append(ns)
+            r, w, s_, ns = score(read, truth, False)
+            acc["recall_r"].append(r); acc["wrong_r"].append(w)
+            acc["sug_r"].append(s_); acc["noise_r"].append(ns)
+            acc["nlines"].append(len(read))
+        row = {"deg": name, "level": lv, "sheets": len(sheets)}
+        row.update({k: round(float(np.mean(v)), 3) for k, v in acc.items()})
+        rows.append(row)
+        print(f"{name:8s} lv{lv}  recall {row['recall_f']:.2f}(filter) "
+              f"{row['recall_r']:.2f}(raw)  false_accept {row['wrong_f']:.2f}/"
+              f"{row['wrong_r']:.2f}  noise_suggest {row['noise_f']:.2f}/{row['noise_r']:.2f}",
+              flush=True)
+
+    # 조건 단위로 덧붙여 쓴다. 중간에 죽어도 앞 조건은 남는다.
+    new_file = not out.exists()
+    with out.open("a", newline="", encoding="utf-8") as fh:
+        wcsv = csv.DictWriter(fh, fieldnames=fields)
+        if new_file:
+            wcsv.writeheader()
         wcsv.writerows(rows)
-    print("wrote", out)
+    if WRONG_LOG:
+        wl = out.with_name(out.stem + "_wrong.txt")
+        with wl.open("a", encoding="utf-8") as fh:
+            for cond, lv, q, got, truth in WRONG_LOG:
+                fh.write("%s lv%d | 읽음=%r | 확정=%r | 정답=%s" % (cond, lv, q, got, truth) + chr(10))
+    if a.one is None:
+        print("wrote", out)
+    return
 
 
 if __name__ == "__main__":
