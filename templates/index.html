@@ -5,6 +5,25 @@
 <div class="card p-4 mb-4 border-rose-200 bg-rose-50 text-sm text-rose-700">{{ error }}</div>
 {% endif %}
 
+{# 한 화면에 두 흐름을 다 펼쳐놨더니 제출 버튼이 다섯, 증상 선택이 두
+   벌이었다. 사진을 올리고 아래 직접 입력 버튼을 누르는 일이 실기기
+   시험에서 나왔다. 사용자 실수가 아니라 화면 설계 잘못이다.
+
+   한 번에 하나만 보여준다. 고르는 것은 맨 위에서 한 번만 한다. #}
+<div class="flex gap-2 mb-5" role="tablist">
+  <button type="button" id="tab-photo" data-target="pane-photo"
+          class="tab flex-1 py-2.5 rounded-xl text-sm font-medium border
+                 bg-slate-900 text-white border-slate-900">
+    사진으로 찾기
+  </button>
+  <button type="button" id="tab-name" data-target="pane-name"
+          class="tab flex-1 py-2.5 rounded-xl text-sm font-medium border
+                 bg-white text-slate-600 border-slate-300 hover:bg-slate-50">
+    이름으로 찾기
+  </button>
+</div>
+
+<div id="pane-photo">
 <form method="post" action="/upload" enctype="multipart/form-data" class="space-y-5">
 
   <div class="card p-5">
@@ -94,6 +113,8 @@
     약봉투가 없어요 · 샘플로 해보기
   </button>
 </form>
+</div>
+
 
 <script>
   // 사진 한 장의 예상 소요(초). 배포 서버 실측이다.
@@ -175,23 +196,12 @@
   });
 </script>
 
-{# 직접 입력은 사진의 대체 경로가 아니라 동등한 경로다. details 안에 숨겨
-   두었더니 사진이 안 되는 사람이 여기까지 못 왔다. #}
-{# 한 화면에 제출 버튼이 둘이다. 사진을 올린 사람이 아래로 내려와
-   "확인하기" 를 누르는 일이 실제로 있었다. 두 경로가 다르다는 것을
-   화면에서 먼저 말하고, 눌렀을 때도 한 번 더 잡는다. #}
-<div class="my-8 flex items-center gap-3">
-  <div class="flex-1 border-t border-slate-200"></div>
-  <span class="text-sm text-slate-400">또는</span>
-  <div class="flex-1 border-t border-slate-200"></div>
-</div>
-
-<div>
-  <div class="text-sm font-medium text-slate-700 mb-1">사진 없이 약 이름으로 찾기</div>
+{# 직접 입력은 사진의 대체 경로가 아니라 동등한 경로다. 그래서 숨기지
+   않고 탭으로 나란히 둔다. details 안에 넣었을 때는 사진이 안 되는
+   사람이 여기까지 오지 못했다. #}
+<div id="pane-name" class="hidden">
   <p class="text-sm text-slate-500 mb-4">
-    <span class="font-medium text-slate-700">사진을 올리셨다면 여기는 비워두세요.</span>
-    위의 <span class="font-medium">사진에서 약 찾기</span> 를 누르시면 됩니다.
-    봉투가 없거나 글씨가 흐릿할 때만 아래에 이름을 적어주세요.
+    봉투가 없거나 글씨가 흐릿할 때 쓰시면 됩니다. 두 글자만 쳐도 목록이 나옵니다.
   </p>
 
   <form method="post" action="/confirm" class="space-y-5">
@@ -251,6 +261,24 @@
     </button>
   </form>
 </div>
+
+<script>
+// 탭. 한 번에 한 흐름만 보여준다.
+(function () {
+  var on = 'bg-slate-900 text-white border-slate-900'.split(' ');
+  var off = 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'.split(' ');
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      document.querySelectorAll('.tab').forEach(function (o) {
+        var sel = o === t;
+        o.classList.remove.apply(o.classList, sel ? off : on);
+        o.classList.add.apply(o.classList, sel ? on : off);
+        document.getElementById(o.dataset.target).classList.toggle('hidden', !sel);
+      });
+    });
+  });
+})();
+</script>
 
 <script>
 (function () {
@@ -339,33 +367,7 @@
   // 목록에서 안 고르고 그냥 친 것도 버리지 않는다. 기존 경로로 보내면
   // 확인 화면이 비슷한 후보를 찾아 보여준다. 고른 것만 받고 나머지를
   // 조용히 버리면 사용자는 자기가 적은 약이 어디 갔는지 모른다.
-  // 사진을 올려놓고 이쪽 버튼을 누르는 일이 실제로 있었다. 화면에 제출
-  // 버튼이 둘이고, 사진 칸은 위에 있는데 이 버튼이 아래에 있어서다.
-  // 문구로 갈라놓았지만 눌렀을 때도 한 번 더 잡는다. 그냥 보내면
-  // "약 이름을 적고 목록에서 골라주세요" 가 떠서, 사진을 올린 사람이
-  // 자기가 뭘 잘못했는지 모른다.
-  box.addEventListener('submit', function (e) {
-    var hasPhoto = false;
-    document.querySelectorAll('input[type=file]').forEach(function (f) {
-      if (f.files.length) { hasPhoto = true; }
-    });
-    var hasDrug = false;
-    box.querySelectorAll('[data-role=drug]').forEach(function (x) {
-      if (x.value.trim()) { hasDrug = true; }
-    });
-    if (hasPhoto && !hasDrug) {
-      e.preventDefault();
-      var go = document.getElementById('go');
-      go.scrollIntoView({behavior: 'smooth', block: 'center'});
-      go.classList.add('ring-4', 'ring-amber-300');
-      var d = document.getElementById('godirect');
-      d.textContent = '사진은 위의 버튼으로 찾습니다';
-      setTimeout(function () {
-        d.textContent = '적은 약 이름으로 확인하기';
-        go.classList.remove('ring-4', 'ring-amber-300');
-      }, 4000);
-      return;
-    }
+  box.addEventListener('submit', function () {
     box.querySelectorAll('.rows').forEach(function (rows) {
       var i = rows.dataset.env, free = [];
       rows.querySelectorAll('.row').forEach(function (row) {
