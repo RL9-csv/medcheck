@@ -149,20 +149,53 @@ class RapidEngine:
             inter_op_num_threads=int(os.environ.get("OCR_THREADS", "0")) or -1,
         )
 
+    @staticmethod
+    @functools.lru_cache(maxsize=1)
+    def _build_hi():
+        """한 줄도 못 읽었을 때만 쓰는 고해상도 판독기.
+
+        기본 판독기는 긴 변을 1280 으로 강제로 줄인다. 약봉투를 가까이서
+        찍으면 그걸로 충분하고 시간도 절반이다. 그런데 화면이나 종이를
+        멀리서 찍으면 글자가 원래 작고, 1280 으로 더 줄이면 검출 자체가
+        안 된다. 실제로 화면을 찍은 사진에서 0줄이 나왔다.
+
+        평소에는 만들어지지 않는다. 첫 판독이 빈손일 때만 만들어진다.
+        """
+        from rapidocr_onnxruntime import RapidOCR
+        root = pathlib.Path(os.environ.get("ONNX_MODEL_DIR", "models_onnx"))
+        return RapidOCR(
+            det_model_path=str(root / "det.onnx"),
+            rec_model_path=str(root / "rec.onnx"),
+            cls_model_path=str(root / "cls.onnx"),
+            rec_keys_path=str(root / "korean_dict.txt"),
+            use_cls=False,
+            det_limit_type="max",
+            det_limit_side_len=int(os.environ.get("OCR_RETRY_SIDE", "2048")),
+            intra_op_num_threads=int(os.environ.get("OCR_THREADS", "0")) or -1,
+            inter_op_num_threads=int(os.environ.get("OCR_THREADS", "0")) or -1,
+        )
+
     @classmethod
     def _reader(cls):
         return cls._build()
 
-    def read(self, image: bytes) -> list[Line]:
+    def _run(self, reader, image: bytes) -> list[Line]:
         import numpy as np
         from PIL import Image
         import io
 
         img = np.array(Image.open(io.BytesIO(image)).convert("RGB"))
-        res, _ = self._reader()(img)
+        res, _ = reader(img)
         if not res:
             return []
         return [Line(t.strip(), float(c)) for _, t, c in res if t and t.strip()]
+
+    def read(self, image: bytes) -> list[Line]:
+        return self._run(self._reader(), image)
+
+    def read_hi(self, image: bytes) -> list[Line]:
+        """더 큰 해상도로 한 번 더. 빈손일 때만 부른다."""
+        return self._run(self._build_hi(), image)
 
 
 class GoogleVisionEngine:

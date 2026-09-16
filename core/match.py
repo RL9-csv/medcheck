@@ -342,7 +342,16 @@ def _resolve(query: str):
     if not cands or cands[0].confidence < SUGGEST:
         # 1단(DUR)에 없다. 2단(허가목록)에서 찾는다. 이름만 맞히고 판정은 못 한다.
         p = _search_permit(q)
-        if p:
+        # 1단과 같은 문턱을 쓴다. 전에는 여기에 문턱이 없어서 2단은 0.50 만
+        # 넘으면 후보로 나갔다. 같은 화면에 기준이 두 개였던 것이다.
+        # 그래서 약이 아닌 줄이 후보로 떴다.
+        #
+        #   투여횟수3              -> 0.514 로 후보 표시
+        #   위장장애가나타날수있어요   -> 0.514 로 후보 표시
+        #
+        # 사용자는 자기가 먹지도 않는 약을 고르라는 화면을 본다. 이 프로젝트가
+        # 가장 위험하다고 정한 실패(틀린 것을 확정)로 가는 문을 열어둔 셈이다.
+        if p and p.confidence >= SUGGEST:
             return (p, [p], "auto") if p.confidence >= AUTO else (None, [p], "suggest")
         return None, [], "none"
     top = cands[0]

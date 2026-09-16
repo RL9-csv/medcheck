@@ -239,7 +239,7 @@ async def upload(request: Request):
         if len(blob) > MAX_BYTES:
             too_big = True          # 조용히 버리지 않는다. 아래에서 말한다
             continue
-        images.append(_shrink(blob))
+        images.append(blob)      # 축소는 작업자 안에서. 재시도에 원본이 필요하다
         labels.append((form.get(f"label{i}") or "").strip())
 
     if not images:
@@ -311,8 +311,30 @@ async def confirm_job(request: Request, job_id: str):
 
 
 async def _do_upload(images, labels, symptoms, t):
+    eng = ocr.get_engine()
     with t.stage("ocr"):
-        pages = await ocr.read_many(ocr.get_engine(), images)
+        small = [_shrink(b) for b in images]
+        pages = await ocr.read_many(eng, small)
+
+        # 한 줄도 못 읽은 사진만 원본 해상도로 한 번 더 본다.
+        #
+        # 기본 판독기는 긴 변을 1280 으로 줄인다. 약봉투를 가까이서 찍으면
+        # 충분하지만, 화면이나 종이를 멀리서 찍으면 글자가 원래 작아서
+        # 검출이 아예 안 된다. 실제로 화면을 찍은 사진이 0줄이 나왔다.
+        #
+        # 평소에는 이 경로를 안 탄다. 빈손일 때만 값을 치른다 — 정확히
+        # 그때가 값을 치를 만한 때다.
+        if hasattr(eng, "read_hi"):
+            for i, page in enumerate(pages):
+                if page:
+                    continue
+                try:
+                    pages[i] = await asyncio.to_thread(eng.read_hi, images[i])
+                    t.count("ocr_retry", 1)
+                    if pages[i]:
+                        t.count("ocr_retry_hit", 1)
+                except Exception:
+                    pass
 
     # 매칭은 rapidfuzz 안에서 도는 동기 연산이다. 그대로 await 없이
     # 부르면 이벤트 루프를 붙잡는다. 실물 사진 129줄이 45초였는데 그
@@ -328,8 +350,8 @@ async def _do_upload(images, labels, symptoms, t):
     t.count("photos", len(images))
     t.count("empty_pages", sum(1 for p in pages if not p))
     # 파일명과 읽은 텍스트는 로그에 남기지 않는다. 개수와 시간만 남긴다.
-    t.emit("upload", engine=ocr.get_engine().name,
-           bytes_total=sum(len(b) for b in images))
+    t.emit("upload", engine=eng.name,
+           bytes_total=sum(len(b) for b in small))
 
     # 원본 이미지는 여기서 끝난다. 남기는 것은 화면에 그릴 내용뿐이다.
     images.clear()

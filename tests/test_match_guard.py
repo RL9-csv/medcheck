@@ -65,3 +65,39 @@ def test_세글자_이하는_오차를_허용하지_않는다():
     assert len("아펜탕") < EXACT_BELOW
     assert search("아펜탕") == []
     assert search("30분") == []
+
+
+# --- 2단 후보에도 같은 문턱을 적용한다 ---------------------------------------
+#
+# 1단은 confidence >= SUGGEST(0.60) 여야 후보로 나가는데, 2단 폴백에는
+# 문턱이 없어서 0.50 만 넘으면 나갔다. 같은 화면에 기준이 두 개였다.
+# 그래서 약이 아닌 줄이 후보로 떴다.
+#
+#   투여횟수3              0.514 로 후보 표시
+#   위장장애가나타날수있어요   0.514 로 후보 표시
+#
+# 사용자가 먹지도 않는 약을 고르라는 화면을 보게 된다. 이 프로젝트가 가장
+# 위험하다고 정한 실패로 가는 문이다.
+
+NOT_DRUG = [
+    "투여횟수3", "위장장애가나타날수있어요", "위장장애가 나타날 수 있어요",
+    "복용후졸음이올수있어요", "충분한물과함께",
+]
+
+
+@pytest.mark.parametrize("junk", NOT_DRUG)
+def test_약이_아닌_문장은_후보로_내보내지_않는다(junk):
+    med, cands, status = resolve(junk)
+    assert status == "none", "%s 가 %s 로 나갔다: %s" % (
+        junk, status, [c.product_name for c in cands])
+
+
+# 문턱을 올려도 2단 실제 품목은 그대로 살아야 한다. 양방향을 다 막는다.
+TIER2_REAL = ["바난정", "위피드정", "킨도라제정", "액티피드시럽", "에리우스정"]
+
+
+@pytest.mark.parametrize("name", TIER2_REAL)
+def test_2단_실제_품목은_문턱을_올려도_살아있다(name):
+    med, cands, status = resolve(name)
+    assert status != "none", "%s 가 사라졌다" % name
+    assert any(c.product_name.startswith(name[:4]) for c in cands)
