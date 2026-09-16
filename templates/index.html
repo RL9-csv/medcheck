@@ -21,7 +21,7 @@
       <div class="flex items-center gap-2 mb-2">
         <span class="text-sm font-medium text-slate-700 w-14">봉투 {{ i }}</span>
         <input name="label{{ i }}" placeholder="이름 붙이기 (선택 · {{ place[loop.index0] }})"
-               class="text-sm px-2.5 py-1 border rounded-lg flex-1 max-w-52
+               class="text-base px-2.5 py-1.5 border rounded-lg flex-1 max-w-52
                       focus:outline-none focus:ring-2 focus:ring-slate-300">
       </div>
       <input type="file" name="photo{{ i }}" accept="image/*" capture="environment"
@@ -132,32 +132,19 @@
 
   <form method="post" action="/confirm" class="space-y-5">
     <div class="card p-5">
-      <p class="text-sm text-slate-500 mb-2">봉투별로 나눠서, 한 줄에 하나씩 적어주세요.</p>
+      {# 예전에는 한 칸에 여러 줄을 적게 했고, 그래서 "용량을 빼라"
+         "성분명 말고 제품명을 적어라" 같은 규칙을 사용자에게 지우고 있었다.
+         목록에서 고르게 되면서 그 규칙이 전부 필요 없어졌다. 고른 값은
+         품목코드로 넘어가므로 표기 차이가 생길 자리가 없다.
 
-      {# 어디까지 적어야 하는지를 사용자가 모른다. 약봉투에는 제품명·용량·용법이
-         한 줄에 인쇄돼 있어서 통째로 옮겨 적기 쉽다. 실측으로 갈렸다.
-
-           에어탈정                  auto
-           에어탈정 100mg            suggest   용량을 적으면 오히려 나빠진다
-           에어탈정 1일3회 식후30분     auto      용법은 붙어도 안 나빠진다
-           아세클로페낙               suggest -> 아세페낙정   성분명만 적으면 다른 약
-
-         용량이 나쁜 이유는 카탈로그 이름의 표기와 다르기 때문이다.
-         "100mg" 과 "100밀리그램" 이 다르게 읽힌다. #}
+         남은 것은 하나뿐이다. 성분명(아세클로페낙)을 치면 그 성분이 든
+         다른 제품이 뜬다. 이건 목록에서 이름을 보고 고르면 드러난다. #}
       <div class="mb-4 text-sm bg-slate-50 rounded-lg p-3.5 leading-relaxed">
-        <div class="font-medium text-slate-700 mb-1.5">약 이름만 적으시면 됩니다</div>
+        <div class="font-medium text-slate-700 mb-1.5">두 글자만 쳐도 목록이 나옵니다</div>
         <div class="text-slate-600">
-          봉투에 인쇄된 <span class="font-medium">제품 이름</span>만 적어주세요.
-          용량이나 성분 이름은 없어도 됩니다.
-        </div>
-        <div class="mt-2 space-y-0.5 font-mono text-xs">
-          <div class="text-emerald-700">에어탈정</div>
-          <div class="text-emerald-700">코대원포르테시럽</div>
-          <div class="text-slate-400 line-through">에어탈정 100mg &nbsp;<span class="font-sans no-underline">용량은 빼주세요</span></div>
-          <div class="text-slate-400 line-through">아세클로페낙 &nbsp;<span class="font-sans no-underline">성분 이름만으로는 다른 약이 나옵니다</span></div>
-        </div>
-        <div class="mt-2 text-xs text-slate-500">
-          정확한 이름이 기억나지 않으면 아는 만큼만 적어주세요. 비슷한 약을 찾아서 보여드립니다.
+          봉투에 인쇄된 이름을 치고 <span class="font-medium">목록에서 고르시면</span> 됩니다.
+          용량은 안 적으셔도 되고, 오타가 나도 비슷한 이름을 찾아드립니다.
+          병원이나 약국이 다르면 봉투를 나눠 적어주세요.
         </div>
       </div>
       {% set place = ['예: 내과', '예: 정형외과', '예: 약국'] %}
@@ -167,7 +154,7 @@
         <div class="flex items-center gap-2 mb-2.5">
           <span class="text-sm font-medium text-slate-700">봉투 {{ i }}</span>
           <input name="label{{ i }}" placeholder="이름 붙이기 (선택 · {{ place[loop.index0] }})"
-                 class="text-sm px-2.5 py-1 border rounded-lg flex-1 max-w-52
+                 class="text-base px-2.5 py-1.5 border rounded-lg flex-1 max-w-52
                         focus:outline-none focus:ring-2 focus:ring-slate-300">
         </div>
 
@@ -179,7 +166,7 @@
           <div class="row relative">
             <input type="text" autocomplete="off" data-role="drug"
                    placeholder="{{ egs[loop.index0] }}"
-                   class="w-full text-sm px-3 py-2.5 border rounded-lg
+                   class="w-full text-base px-3 py-2.5 border rounded-lg
                           focus:outline-none focus:ring-2 focus:ring-slate-300">
             <input type="hidden" name="seq{{ i }}" data-role="seq">
           </div>

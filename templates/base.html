@@ -8,6 +8,11 @@
 <style>
   body { font-family: -apple-system, "Pretendard", "Malgun Gothic", sans-serif; }
   .card { background:#fff; border:1px solid #e5e7eb; border-radius:14px; }
+  /* iOS 사파리는 포커스된 입력의 글자가 16px 미만이면 페이지를 자동 확대한다.
+     약마다 칸이 있어서 칸을 옮길 때마다 화면이 줌인되고 사용자가 손으로
+     되돌려야 한다. 개별 클래스로도 16px 을 주고 있지만, 새 입력을 추가할 때
+     잊기 쉬워서 여기서 한 번 더 막는다. */
+  input:not([type=checkbox]):not([type=radio]), textarea, select { font-size: 16px; }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
