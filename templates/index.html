@@ -323,12 +323,20 @@
     items.forEach(function (it) {
       var b = document.createElement('button');
       b.type = 'button';
-      b.className = 'w-full text-left px-3 py-2 text-sm hover:bg-slate-50 ' +
+      b.className = 'w-full text-left px-3 py-2 text-sm hover:bg-slate-50 min-w-0 ' +
                     'border-b border-slate-100 last:border-0';
       // 판정이 되는 약과 이름만 아는 약을 여기서부터 구분해 보여준다.
       // 고르고 나서 결과 화면에서 처음 듣는 것보다 낫다.
-      b.innerHTML = '<div class="text-slate-800">' + it.name + '</div>' +
-        (it.dur ? '' : '<div class="text-xs text-amber-700">성분 정보 없음 · 이름만 확인됩니다</div>');
+      // 성분을 같이 보여준다. 판정이 보는 것은 제품명이 아니라 성분이다.
+      // "타이레놀" 여섯 개 중 넷은 성분이 같아서 아무거나 골라도 결과가
+      // 같고, 코푸 계열은 고르는 것마다 다르다. 그 차이가 화면에 보여야
+      // 사용자가 근거를 갖고 고른다.
+      var sub = it.dur
+        ? (it.ing && it.ing.length
+             ? '<div class="text-xs text-slate-500 truncate">' + it.ing.join(' + ') + '</div>'
+             : '')
+        : '<div class="text-xs text-amber-700">성분 정보 없음 · 이름만 확인됩니다</div>';
+      b.innerHTML = '<div class="text-slate-800">' + it.name + '</div>' + sub;
       b.addEventListener('click', function () {
         row.querySelector('[data-role=drug]').value = it.name;
         row.querySelector('[data-role=seq]').value = it.seq;

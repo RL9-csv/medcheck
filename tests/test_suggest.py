@@ -125,3 +125,29 @@ def test_목록에서_안_골라도_친_글자는_확인_화면까지_간다(cli
     r = client.post("/confirm", data={"env1": "에어탈"})
     assert r.status_code == 200
     assert "에어탈" in r.text
+
+
+def test_후보마다_성분을_같이_내려준다(client):
+    # 판정이 보는 것은 제품명이 아니라 성분이다. "타이레놀" 을 치면 여섯
+    # 개가 같은 점수로 나오는데 그중 넷은 성분이 아세트아미노펜 하나로
+    # 같다. 어느 것을 골라도 판정이 같다. 반대로 코푸 계열은 고르는 것마다
+    # 성분 구성이 다르다. 화면이 그 차이를 보여줘야 사용자가 근거를 갖고
+    # 고른다.
+    hits = client.get("/suggest", params={"q": "타이레놀"}).json()
+    assert hits, "후보가 없다"
+    assert all("ing" in h for h in hits), "성분 항목이 빠졌다"
+    acet = [h for h in hits if h["ing"] == ["아세트아미노펜"]]
+    assert len(acet) >= 2, "같은 성분인 제품이 같게 안 나온다"
+
+
+def test_성분이_다른_제품은_다르게_나온다(client):
+    hits = client.get("/suggest", params={"q": "코푸"}).json()
+    sets = {tuple(h["ing"]) for h in hits if h["ing"]}
+    assert len(sets) >= 2, "성분 구성이 다른데 같게 나온다"
+
+
+def test_2단_품목은_성분이_비어있다(client):
+    hits = client.get("/suggest", params={"q": "바난"}).json()
+    t2 = [h for h in hits if not h["dur"]]
+    assert t2, "2단 품목이 없다"
+    assert all(h["ing"] == [] for h in t2), "성분 정보가 없어야 한다"

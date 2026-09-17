@@ -410,8 +410,26 @@ async def suggest(q: str = "", limit: int = 6):
         return JSONResponse([])
     limit = max(1, min(limit, 10))
     hits = await asyncio.to_thread(match.search_all, q, limit)
+
+    # 성분을 같이 내려준다. 판정이 보는 것은 제품명이 아니라 성분이다.
+    #
+    # "타이레놀" 을 치면 여섯 개가 전부 같은 점수로 나오는데, 그중 넷은
+    # 성분이 아세트아미노펜 하나로 같다. 어느 것을 골라도 판정이 같다.
+    # 반대로 코푸 계열은 고르는 것마다 성분 구성이 다르다.
+    #
+    # 화면이 그 차이를 안 보여주니 사용자는 아무 근거 없이 하나를 골라야
+    # 했다. 선택을 없애는 게 아니라 선택할 근거를 준다.
+    def ing(med):
+        seen, out = set(), []
+        for i in med.ingredients:
+            if i.name and i.name not in seen:
+                seen.add(i.name)
+                out.append(i.name)
+        return out
+
     return JSONResponse([{"seq": m.item_seq, "name": m.product_name,
-                          "otc": m.otc, "dur": m.dur_covered} for m in hits])
+                          "otc": m.otc, "dur": m.dur_covered,
+                          "ing": ing(m)} for m in hits])
 
 
 @app.post("/confirm", response_class=HTMLResponse)
