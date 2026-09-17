@@ -6,7 +6,7 @@
   3. 외부 AI가 죽어도 서비스는 계속 동작한다.
   4. 원본 이미지는 추출 직후 폐기하고, 로그에 PII를 남기지 않는다.
 """
-import asyncio, os, sys
+import asyncio, os, re, sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -60,6 +60,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="medcheck", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 tpl = Jinja2Templates(directory=str(ROOT / "templates"))
+tpl.env.globals["pick_value"] = lambda m: _pick_value(m)
 
 
 @app.middleware("http")
@@ -126,6 +127,21 @@ RETRY_AFTER = os.environ.get("RETRY_AFTER", "24")   # 실측 단건 소요시간
 # 넘치면 대기시간으로 거절한다. core/jobs.py 참고.
 QUEUE = Queue(lambda *a: _do_upload(*a),
               max_wait_sec=int(os.environ.get("MAX_WAIT_SEC", "120")))
+
+
+def _pick_value(med) -> str:
+    """확인 화면의 체크박스에 넣을 값.
+
+    표시 이름이 카탈로그 원본과 다르면 "품목코드|표시이름" 으로 넘긴다.
+    안 그러면 확인 화면에서 "레피졸정" 이라고 보여준 것을 사용자가 확인했는데
+    브리핑에는 "레피졸정15밀리그램" 이 찍힌다. 확인한 것과 다른 이름을
+    의사에게 보여주라고 말하게 된다.
+
+    사진에서 확정된 약은 카탈로그 원본 그대로라 코드만 넘어간다.
+    """
+    from core.match import _catalog, _permit
+    orig = dict((r[0], r[1]) for r in _catalog()).get(med.item_seq)         or dict(_permit()).get(med.item_seq)
+    return f"{med.item_seq}|{med.product_name}"         if orig and med.product_name != orig else med.item_seq
 
 
 def _envelope(index, label, lines, trace, drop_none=False):
@@ -393,6 +409,82 @@ async def _do_upload(images, labels, symptoms, t):
             "from_photo": True}
 
 
+_FORM_CUT = re.compile(
+    r"(정|캡슐|캅셀|시럽|산|과립|주사|주|액|연고|크림|건조시럽|좌제|"
+    r"현탁액|점안액|패치|환|겔|로션|분말|필름)")
+
+
+# 먹는 약끼리는 제형이 달라도 같은 약으로 본다. 주사·연고·점안액은
+# 사용 방법 자체가 달라서 따로 둔다. 봉투로 받아 입으로 먹는 약을 찾는
+# 사람에게 주사제를 대표로 보여주면 안 된다.
+_ORAL = ("정", "캡슐", "캅셀", "시럽", "산", "과립", "액", "환", "건조시럽",
+         "현탁액", "분말", "필름", "트로키")
+
+
+# 묶인 줄에 찍을 이름. 함량·제형만 다른 것들의 공통 앞부분을 쓴다.
+#
+# 레피졸정5 / 10 / 15 / 30밀리그램을 한 줄로 묶어놓고 대표를 "레피졸정15밀리그램"
+# 으로 찍으면, 5밀리그램을 드시는 분의 브리핑에 15밀리그램이 인쇄된다. 판정은
+# 성분만 보므로 결과는 같지만 출력물은 틀린다. 브리핑은 진료 때 보여주는 것이라
+# 없는 숫자를 지어내면 안 된다. 공통 앞부분만 남기고 함량을 뗀다.
+#
+#   레피졸정5/10/15/30밀리그램   ->  레피졸정
+#   아모잘탄엑스큐정 5/50/5/10…   ->  아모잘탄엑스큐정
+#   뮤테란캡슐200 / 과립200      ->  뮤테란        (제형도 다르면 거기까지 잘린다)
+_LABEL_TAIL = re.compile(r"[\s/.,\-\d]+$")
+# 긴 것부터 본다. "건조시럽" 을 "시럽" 으로, "캡슐" 을 "산"(캡슐에는 없지만)
+# 처럼 짧은 토큰이 먼저 걸리는 것을 막는다.
+_LABEL_FORM = re.compile(
+    r"(건조시럽|현탁액|점안액|캡슐|캅셀|과립|시럽|주사|연고|크림|좌제|패치|"
+    r"로션|분말|필름|정|산|액|환|겔|주)")
+
+
+def _group_label(names: list[str]) -> str:
+    """묶인 품목명들에 찍을 이름.
+
+    함량은 떼고 제형은 남긴다. 함량은 사용자가 모를 수 있고 판정에도 안
+    쓰이지만, 제형은 사용자가 손에 들고 있어서 아는 정보다. 확인 화면은
+    사람이 "내 약이 맞나" 를 보는 자리이므로 아는 정보를 지우면 안 된다.
+
+      레피졸정5 / 10 / 30밀리그램     ->  레피졸정
+      뮤테란캡슐200 / 과립200 / 캡슐100 ->  뮤테란 (캡슐·과립)
+      도모호론연고 / 크림             ->  도모호론 (연고·크림)
+
+    제형이 섞인 묶음은 카탈로그 기준 3,953개 중 214개(5%)다. 나머지
+    95% 는 공통 앞부분에 제형이 그대로 남으므로 괄호가 붙지 않는다.
+    """
+    heads = [match._head(n) for n in names]
+    p = _LABEL_TAIL.sub("", os.path.commonprefix(heads).strip())
+    forms = []
+    for h in heads:
+        m = _LABEL_FORM.search(h[len(p):]) or _LABEL_FORM.search(h)
+        f = m.group(0) if m else ""
+        if f and f not in forms:
+            forms.append(f)
+    if len(forms) > 1:
+        # 순서를 고정한다. 후보가 들어온 순서를 쓰면 같은 약이 질의에 따라
+        # "뮤테란 (과립·캡슐)" 과 "뮤테란 (캡슐·과립)" 으로 갈린다. 이 이름은
+        # 확인 화면과 브리핑에 그대로 찍히므로 같은 약은 항상 같아야 한다.
+        return "%s (%s)" % (p, "·".join(sorted(forms)))
+    return p if len(p) >= 2 else heads[0]
+
+
+def _brand(name: str):
+    """(상표, 먹는 약인가) — 같은 약인지 가르는 기준.
+
+    뮤테란캡슐200밀리그람 -> (뮤테란, True)
+    뮤테란과립200밀리그람 -> (뮤테란, True)     같이 묶인다
+    뮤테란주사            -> (뮤테란, False)    따로 남는다
+    타스펜8시간이알서방정  -> (타스펜, True)
+    타이세펜8시간이알서방정 -> (타이세펜, True)  다른 상표라 안 묶인다
+    """
+    head = match._head(name)
+    m = _FORM_CUT.search(head)
+    brand = (head[:m.start()] if m and m.start() >= 2 else head).strip()
+    form = m.group(0) if m else ""
+    return (brand, form in _ORAL)
+
+
 @app.get("/suggest")
 async def suggest(q: str = "", limit: int = 6):
     """직접 입력 칸의 자동완성. 품목코드까지 같이 내려준다.
@@ -409,7 +501,7 @@ async def suggest(q: str = "", limit: int = 6):
     if len(q) < 2:
         return JSONResponse([])
     limit = max(1, min(limit, 10))
-    hits = await asyncio.to_thread(match.search_all, q, limit)
+    hits = await asyncio.to_thread(match.search_all, q, limit * 4)
 
     # 성분을 같이 내려준다. 판정이 보는 것은 제품명이 아니라 성분이다.
     #
@@ -427,9 +519,54 @@ async def suggest(q: str = "", limit: int = 6):
                 out.append(i.name)
         return out
 
-    return JSONResponse([{"seq": m.item_seq, "name": m.product_name,
-                          "otc": m.otc, "dur": m.dur_covered,
-                          "ing": ing(m)} for m in hits])
+    # 성분이 같으면 한 줄로 묶는다.
+    #
+    # 뮤테란을 치면 과립200 / 캡슐200 / 캡슐100 / 주사 네 줄이 나오는데
+    # 성분이 전부 아세틸시스테인 하나다. 판정 결과가 같으므로 사용자에게
+    # 물을 이유가 없는 선택이었다. 용량과 제형만 다른 같은 약을 네 줄로
+    # 나눠 놓고 고르라고 한 셈이다.
+    #
+    # 묶는 기준은 (상표 + 성분) 이다. 성분만으로 묶으면 안 된다 —
+    # 아세트아미노펜 하나짜리 해열제만 스무 개가 넘고 전부 다른 회사
+    # 제품이다. 성분만 보면 타스펜과 타이세펜이 한 줄이 되어 사용자가
+    # 찾던 약이 묻힌다.
+    #
+    # 상표는 이름에서 용량과 제형을 떼어낸 앞부분이다. 뮤테란캡슐200 과
+    # 뮤테란과립200 은 상표가 같아 묶이고, 타스펜과 타이세펜은 갈린다.
+    #
+    # 대표 이름은 검색어에 가장 가까운 것을 쓴다. 가장 짧은 이름을 골랐더니
+    # 뮤테란에서 "뮤테란주사" 가 대표가 됐다. 주사제는 사용자가 봉투로
+    # 받아온 약이 아니다. 사용자가 친 글자와 가까운 쪽이 그 사람이 찾는
+    # 약이다.
+    out, seen = [], {}
+    for med in hits:
+        names = ing(med)
+        key = (_brand(med.product_name), tuple(sorted(names))) if names             else ("", med.item_seq)
+        if key in seen:
+            g = seen[key]
+            g["also"] += 1
+            g["_members"].append(med.product_name)
+            if med.confidence > g["_conf"] or (
+                    med.confidence == g["_conf"]
+                    and len(match._head(med.product_name)) < len(match._head(g["name"]))):
+                g["name"], g["seq"] = med.product_name, med.item_seq
+                g["_conf"] = med.confidence
+            continue
+        g = {"seq": med.item_seq, "name": med.product_name, "otc": med.otc,
+             "dur": med.dur_covered, "ing": names, "also": 0,
+             "_conf": med.confidence, "_members": [med.product_name]}
+        seen[key] = g
+        out.append(g)
+
+    # 자르는 것은 전부 묶은 뒤에 한다. 묶는 도중에 끊으면 그 뒤 항목이
+    # 기존 그룹에 합쳐질 수 있는데 세어지지 않아서 "외 N개" 가 실제보다
+    # 작게 나온다.
+    out = out[:limit]
+    for g in out:
+        g["name"] = _group_label(g["_members"]) if g["also"] else g["name"]
+        g.pop("_conf", None)
+        g.pop("_members", None)
+    return JSONResponse(out)
 
 
 @app.post("/confirm", response_class=HTMLResponse)
@@ -442,14 +579,33 @@ async def confirm(request: Request):
         out = []
         for i in range(1, 6):
             # 자동완성에서 고른 것. 이미 품목이 정해졌으므로 다시 찾지 않는다.
-            picked = [v for v in form.getlist(f"seq{i}") if v]
+            #
+            # 값은 "품목코드" 또는 "품목코드|표시이름" 이다. 함량만 다른
+            # 약을 한 줄로 묶어 보여줬을 때, 고른 뒤에 카탈로그 원래 이름을
+            # 찍으면 안 된다. "레피졸정" 을 고른 사람 화면에
+            # "레피졸정15밀리그램" 이 나오고, 우리 브리핑은 그 이름을
+            # 의사에게 보여주라고 말한다. 사용자가 정하지 않은 용량이다.
+            #
+            # 사진에서 확정된 약은 다르다. OCR 이 봉투에 인쇄된 함량을
+            # 실제로 읽었으므로 아는 정보다. 그건 그대로 보여준다.
+            # 표시이름은 묶어서 고른 경우에만 붙는다.
+            picked, disp = [], {}
+            for v in form.getlist(f"seq{i}"):
+                if not v:
+                    continue
+                seq, _, label = v.partition("|")
+                seq = seq.strip()
+                if seq not in disp:
+                    picked.append(seq)
+                if label.strip():
+                    disp[seq] = label.strip()
             raw = (form.get(f"env{i}") or "").strip()
             lines = [x.strip() for x in raw.splitlines() if x.strip()]
             if not picked and not lines:
                 continue
             env = _envelope(i, form.get(f"label{i}") or "", lines, t)
             if picked:
-                chosen = _load_meds(list(dict.fromkeys(picked)))
+                chosen = _load_meds(picked, disp)
                 t.count("picked", len(chosen))
                 env["items"] = [{"query": m.product_name, "status": "auto",
                                  "auto": m, "candidates": [m]}
@@ -477,7 +633,7 @@ async def confirm(request: Request):
         "symptom_defs": engine.SYMPTOMS, "trace": t.stages})
 
 
-def _load_meds(seqs):
+def _load_meds(seqs, display=None):
     """확정된 품목코드 -> Medication. 사람이 고른 것만 들어온다.
 
     1단(DUR)에 없으면 2단(허가목록)을 본다. 전에는 1단만 보고 없으면
@@ -497,13 +653,17 @@ def _load_meds(seqs):
     for seq in seqs:
         r = by_seq.get(seq)
         if r:
-            out.append(Medication(item_seq=r[0], product_name=r[1], otc=r[3],
+            out.append(Medication(item_seq=r[0],
+                                  product_name=(display or {}).get(seq) or r[1],
+                                  otc=r[3],
                                   ingredients=list(_ingredients_cached(r[2])),
                                   confidence=1.0, confirmed=True))
             continue
         name = permit.get(seq)
         if name:
-            out.append(Medication(item_seq=seq, product_name=name, otc="",
+            out.append(Medication(item_seq=seq,
+                                  product_name=(display or {}).get(seq) or name,
+                                  otc="",
                                   ingredients=[], confidence=1.0,
                                   confirmed=True, dur_covered=False))
     return out
@@ -537,7 +697,23 @@ async def result(request: Request):
             # 찾아내는 게 이 도구의 목적이다. 접는 범위는 봉투 안이다.
             seqs = list(dict.fromkeys(seqs))
             src = Source(index=i, label=(form.get(f"label{i}") or "").strip() or None)
-            src.medications = _load_meds(seqs)
+            # 확인 화면이 "레피졸정" 이라고 보여준 것을 사용자가 확인했는데
+            # 브리핑에 "레피졸정15밀리그램" 이 찍히면 안 된다. 확인한 것과
+            # 다른 이름을 의사에게 보여주라고 말하게 된다. 표시이름을
+            # 여기까지 들고 온다.
+            #
+            # 파이프를 가른 뒤에 중복을 제거한다. 먼저 제거하면 같은 약인데
+            # 표시이름만 달라 둘로 세어진다.
+            names, order = {}, []
+            for v in seqs:
+                seq, _, label = v.partition("|")
+                seq = seq.strip()
+                if seq not in names:
+                    order.append(seq)
+                    names[seq] = None
+                if label.strip():
+                    names[seq] = label.strip()
+            src.medications = _load_meds(order, {k: v for k, v in names.items() if v})
             if src.medications:
                 review.sources.append(src)
 

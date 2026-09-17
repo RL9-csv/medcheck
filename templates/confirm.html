@@ -43,7 +43,7 @@
     <div class="py-2.5 border-t first:border-t-0">
       {% if true %}
         <label class="flex items-start gap-2.5 cursor-pointer">
-          <input type="checkbox" name="pick{{ env.index }}" value="{{ item.auto.item_seq }}" checked class="mt-1">
+          <input type="checkbox" name="pick{{ env.index }}" value="{{ pick_value(item.auto) }}" checked class="mt-1">
           <span>
             <span class="text-sm">{{ item.auto.product_name }}</span>
             <span class="text-xs text-slate-400 ml-1.5">{{ item.auto.otc }}</span>

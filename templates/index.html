@@ -336,10 +336,18 @@
              ? '<div class="text-xs text-slate-500 truncate">' + it.ing.join(' + ') + '</div>'
              : '')
         : '<div class="text-xs text-amber-700">성분 정보 없음 · 이름만 확인됩니다</div>';
-      b.innerHTML = '<div class="text-slate-800">' + it.name + '</div>' + sub;
+      // 성분이 같아 묶인 개수를 알려준다. 용량·제형만 다른 같은 약이
+      // 여럿이라는 뜻이고, 어느 것을 골라도 판정은 같다.
+      var more = it.also ? '<span class="text-xs text-slate-400 ml-1">외 ' + it.also + '개</span>' : '';
+      b.innerHTML = '<div class="text-slate-800">' + it.name + more + '</div>' + sub;
       b.addEventListener('click', function () {
         row.querySelector('[data-role=drug]').value = it.name;
-        row.querySelector('[data-role=seq]').value = it.seq;
+        // 묶인 줄이면 표시할 이름을 같이 보낸다. 안 보내면 확인·결과
+        // 화면이 카탈로그 원래 이름을 찍어서, "레피졸정" 을 고른 사람에게
+        // "레피졸정15밀리그램" 이 나온다. 사용자가 정하지 않은 용량이고
+        // 그걸 의사에게 보여주라고 안내하게 된다.
+        row.querySelector('[data-role=seq]').value =
+          it.also ? (it.seq + '|' + it.name) : it.seq;
         close(row);
       });
       m.appendChild(b);

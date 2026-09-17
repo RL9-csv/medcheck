@@ -5,6 +5,7 @@
 ("100밀리그램")의 표기 차이가 문제가 되지 않는다. 직접 입력에서
 제일 흔한 실패가 그 둘이었다.
 """
+import re
 import pytest
 from fastapi.testclient import TestClient
 
@@ -151,3 +152,97 @@ def test_2단_품목은_성분이_비어있다(client):
     t2 = [h for h in hits if not h["dur"]]
     assert t2, "2단 품목이 없다"
     assert all(h["ing"] == [] for h in t2), "성분 정보가 없어야 한다"
+
+
+def test_먹는약은_함량_제형이_달라도_한_줄로_묶는다(client):
+    # 뮤테란을 치면 과립200 / 캡슐200 / 캡슐100 / 주사 네 줄이 나왔는데
+    # 성분이 전부 아세틸시스테인 하나다. 판정이 같으므로 사용자에게 물을
+    # 이유가 없는 선택이었다. 다만 주사는 따로 남긴다 — 봉투로 받아 먹는
+    # 약을 찾는 사람에게 주사제를 같은 줄로 보여주면 안 된다.
+    hits = client.get("/suggest", params={"q": "뮤테란"}).json()
+    acet = [h for h in hits if h["ing"] == ["아세틸시스테인"]]
+    oral = [h for h in acet if "주" not in h["name"]]
+    assert len(oral) == 1, "먹는 약이 여러 줄로 나왔다: %s" % [h["name"] for h in oral]
+    assert oral[0]["also"] >= 2, "묶인 개수를 안 알려준다"
+    assert any("주" in h["name"] for h in acet), "주사제가 먹는 약에 합쳐졌다"
+
+
+def test_묶은_줄은_함량을_찍지_않는다(client):
+    # 레피졸정 5 / 10 / 15 / 30밀리그램을 한 줄로 묶어놓고 대표를
+    # "레피졸정15밀리그램" 으로 찍으면, 5밀리그램을 드시는 분의 브리핑에
+    # 15밀리그램이 인쇄된다. 판정은 성분만 보므로 결과는 같지만 출력물은
+    # 틀린다. 브리핑은 진료 때 보여주는 것이라 없는 숫자를 지어내면 안 된다.
+    hits = client.get("/suggest", params={"q": "레피졸"}).json()
+    g = [h for h in hits if h["also"] > 0]
+    assert g, "레피졸이 묶이지 않았다"
+    for h in g:
+        assert not re.search(r"\d", h["name"]),             "묶은 줄에 함량이 남았다: %s" % h["name"]
+
+
+def test_성분이_다르면_안_묶는다(client):
+    # 아세트아미노펜 하나짜리와 아세트아미노펜+파마브롬은 다른 약이다.
+    hits = client.get("/suggest", params={"q": "타이레놀"}).json()
+    sets = {tuple(h["ing"]) for h in hits if h["ing"]}
+    assert len(sets) >= 2, "성분 구성이 다른데 묶였다"
+
+
+def test_대표_이름은_검색어에_가까운_것을_쓴다(client):
+    # 가장 짧은 이름을 고르면 "뮤테란주사" 가 대표가 된다. 주사제는
+    # 사용자가 봉투로 받아온 약이 아니다.
+    hits = client.get("/suggest", params={"q": "뮤테란캅셀"}).json()
+    assert hits and "캡슐" in hits[0]["name"], "대표가 %s 다" % hits[0]["name"]
+
+
+def test_묶어서_고르면_함량이_안_찍힌다(client):
+    # 자동완성에서 함량만 다른 약을 한 줄로 묶어 보여줬는데, 고른 뒤에
+    # 카탈로그 원래 이름을 찍으면 "레피졸정" 을 고른 사람 화면에
+    # "레피졸정15밀리그램" 이 나온다. 우리 브리핑은 그 이름을 의사에게
+    # 보여주라고 말한다. 사용자가 정하지 않은 용량이다.
+    import re
+    hits = client.get("/suggest", params={"q": "레피졸"}).json()
+    g = next((h for h in hits if h["also"]), None)
+    assert g, "묶인 줄이 없다"
+    assert not re.search(r"\d", g["name"]), "묶은 줄 이름에 숫자가 있다: %s" % g["name"]
+
+    r = client.post("/confirm", data={"seq1": "%s|%s" % (g["seq"], g["name"])})
+    shown = re.findall(r'<span class="text-sm">([^<]+)</span>', r.text)
+    assert shown and shown[0] == g["name"], "고른 이름과 다르게 찍혔다: %s" % shown[:1]
+
+
+def test_사진에서_확정된_약은_함량을_유지한다(client):
+    # OCR 이 봉투에 인쇄된 함량을 실제로 읽었으므로 아는 정보다.
+    # 묶어서 고른 것만 떼고 이건 그대로 보여준다.
+    import re
+    hits = client.get("/suggest", params={"q": "레피졸"}).json()
+    g = next(h for h in hits if h["also"])
+    r = client.post("/confirm", data={"seq1": g["seq"]})      # 표시이름 없이
+    shown = re.findall(r'<span class="text-sm">([^<]+)</span>', r.text)
+    assert shown and re.search(r"\d", shown[0]), "함량이 사라졌다: %s" % shown[:1]
+
+
+def test_묶어서_고른_이름이_결과_화면까지_간다(client):
+    # 확인 화면에서 "레피졸정" 이라고 보여준 것을 사용자가 확인했는데
+    # 브리핑에 "레피졸정15밀리그램" 이 찍히면, 확인한 것과 다른 이름을
+    # 의사에게 보여주라고 말하게 된다. confirm.html 이 코드만 넘겨서
+    # 마지막 단계에서 함량이 되살아나던 것을 막는다.
+    import re
+    hits = client.get("/suggest", params={"q": "레피졸"}).json()
+    g = next(h for h in hits if h["also"])
+
+    h1 = client.post("/confirm", data={"seq1": "%s|%s" % (g["seq"], g["name"])}).text
+    v = re.search(r'name="pick1" value="([^"]+)"', h1).group(1)
+    assert "|" in v, "확인 화면이 표시이름을 안 넘긴다: %s" % v
+
+    h2 = client.post("/result", data={"pick1": v}).text
+    shown = re.findall(r">([^<>]*레피졸[^<>]*)<", h2)
+    assert shown, "결과에 약이 없다"
+    assert not any(re.search(r"\d", x) for x in shown), "함량이 되살아났다: %s" % shown[:2]
+
+
+def test_사진에서_확정된_약은_코드만_넘긴다(client):
+    import re
+    hits = client.get("/suggest", params={"q": "레피졸"}).json()
+    g = next(h for h in hits if h["also"])
+    h = client.post("/confirm", data={"seq1": g["seq"]}).text
+    v = re.search(r'name="pick1" value="([^"]+)"', h).group(1)
+    assert "|" not in v, "카탈로그 원본인데 표시이름이 붙었다: %s" % v
