@@ -11,19 +11,19 @@
 
    한 번에 하나만 보여준다. 고르는 것은 맨 위에서 한 번만 한다. #}
 <div class="flex gap-2 mb-5" role="tablist">
-  <button type="button" id="tab-photo" data-target="pane-photo"
-          class="tab flex-1 py-2.5 rounded-xl text-sm font-medium border
-                 bg-slate-900 text-white border-slate-900">
-    사진으로 찾기
-  </button>
   <button type="button" id="tab-name" data-target="pane-name"
           class="tab flex-1 py-2.5 rounded-xl text-sm font-medium border
-                 bg-white text-slate-600 border-slate-300 hover:bg-slate-50">
+                 bg-slate-900 text-white border-slate-900">
     이름으로 찾기
+  </button>
+  <button type="button" id="tab-photo" data-target="pane-photo"
+          class="tab flex-1 py-2.5 rounded-xl text-sm font-medium border
+                 bg-white text-slate-600 border-slate-300 hover:bg-slate-50">
+    사진으로 찾기
   </button>
 </div>
 
-<div id="pane-photo">
+<div id="pane-photo" class="hidden">
 <form method="post" action="/upload" enctype="multipart/form-data" class="space-y-5">
 
   <div class="card p-5">
@@ -199,7 +199,7 @@
 {# 직접 입력은 사진의 대체 경로가 아니라 동등한 경로다. 그래서 숨기지
    않고 탭으로 나란히 둔다. details 안에 넣었을 때는 사진이 안 되는
    사람이 여기까지 오지 못했다. #}
-<div id="pane-name" class="hidden">
+<div id="pane-name">
   <p class="text-sm text-slate-500 mb-4">
     봉투가 없거나 글씨가 흐릿할 때 쓰시면 됩니다. 두 글자만 쳐도 목록이 나옵니다.
   </p>
@@ -221,14 +221,21 @@
           병원이나 약국이 다르면 봉투를 나눠 적어주세요.
         </div>
       </div>
+      {# 봉투 셋을 한꺼번에 펼쳐 두면 "셋 다 채워야 하나" 로 읽힌다.
+         한 봉투만 적는 사람이 대부분이므로 1번만 보이고 필요할 때 꺼낸다.
+
+         봉투를 나누는 이유는 따로 있다. 같은 약이 서로 다른 병원에서
+         나오면 그게 소견이다. 한 칸에 몰아 적으면 그 구분이 사라진다. #}
       {% set place = ['예: 내과', '예: 정형외과', '예: 약국'] %}
       {% set egs = ['에어탈', '타이레놀', '바난'] %}
       {% for i in [1,2,3] %}
-      <div class="mb-5 pb-5 {% if not loop.last %}border-b border-slate-100{% endif %}">
+      <div class="env-block {% if i > 1 %}hidden{% endif %} mb-5 pb-5
+                  {% if not loop.last %}border-b border-slate-100{% endif %}"
+           data-block="{{ i }}">
         <div class="flex items-center gap-2 mb-2.5">
           <span class="text-sm font-medium text-slate-700">봉투 {{ i }}</span>
-          <input name="label{{ i }}" placeholder="이름 붙이기 (선택 · {{ place[loop.index0] }})"
-                 class="text-base px-2.5 py-1.5 border rounded-lg flex-1 max-w-52
+          <input name="label{{ i }}" placeholder="어디서 받았나요? (선택 · {{ place[loop.index0] }})"
+                 class="text-base px-2.5 py-1.5 border rounded-lg flex-1 max-w-56
                         focus:outline-none focus:ring-2 focus:ring-slate-300">
         </div>
 
@@ -247,10 +254,15 @@
         </div>
         <button type="button" data-role="add" data-env="{{ i }}"
                 class="mt-2 text-sm text-slate-500 hover:text-slate-800">
-          + 약 추가
+          + 이 봉투에 약 추가
         </button>
       </div>
       {% endfor %}
+
+      <button type="button" id="moreenv"
+              class="text-sm text-slate-500 hover:text-slate-800">
+        + 다른 병원·약국 봉투 추가
+      </button>
     </div>
 
     {% include "_symptoms.html" %}
@@ -350,6 +362,20 @@
   }
 
   box.querySelectorAll('.row').forEach(wire);
+
+  // 봉투는 필요할 때만 꺼낸다. 처음부터 셋을 펼치면 다 채워야 하는 것으로
+  // 읽힌다. 봉투를 나누는 이유는 같은 약이 다른 병원에서 나오면 그게
+  // 소견이기 때문이다.
+  var moreEnv = document.getElementById('moreenv');
+  if (moreEnv) {
+    moreEnv.addEventListener('click', function () {
+      var next = box.querySelector('.env-block.hidden');
+      if (!next) { return; }
+      next.classList.remove('hidden');
+      next.querySelector('[data-role=drug]').focus();
+      if (!box.querySelector('.env-block.hidden')) { this.classList.add('hidden'); }
+    });
+  }
 
   box.querySelectorAll('[data-role=add]').forEach(function (btn) {
     btn.addEventListener('click', function () {
