@@ -82,6 +82,32 @@ _FORM_TOKEN = re.compile(
     r"정|캡슐|캅셀|시럽|산|주|액|환|과립|패취|크림|연고|겔|점안|흡입|좌|짜|첩|건조|분말"
     r"|경고제|관류제|트로키제|아가아제|이식제")
 _ONLY_KOR = re.compile(r"^[가-힣\s]+$")
+# 약봉투·복약안내문에 인쇄되는 성상(생김새) 설명. 약 이름이 아니다.
+#   흰색경질캡슐 / 주홍|황색경질캡슐 / 노란색연질캡슐 / 분홍색타원형정제
+# 제형 토큰(캡슐·정제)이 들어 있어서 위 약효분류 규칙에 안 걸린다. 색 이름으로
+# 시작하는 순한글 줄이라는 별도 성질로 잡는다.
+#
+# "연질" 이나 "경질" 로 거르면 안 된다. 실제 품목명에 연질 2,956건, 경질 3건이
+# 들어 있다. 색 이름 시작 + 순한글 조합은 카탈로그 65,995건에서 죽이는 품목이 0건이다.
+# "진갈"·"연갈" 을 넣었다가 진갈근탕액이 죽어서 뺐다. 성상 원문은 "진한갈색" 이라
+# 손실이 없다.
+#
+# 한계: 앞으로 색 이름으로 시작하는 순한글 품목명이 등재되면 이 규칙이 죽인다.
+# 지금 카탈로그에 없다는 것과 앞으로 없다는 것은 다르다. 카탈로그를 갱신할 때
+# 이 규칙을 65,995건에 다시 통과시켜 0건인지 확인할 것.
+_COLOR = ("흰색", "백색", "황색", "적색", "청색", "녹색", "갈색", "회색", "무색",
+          "투명", "분홍", "주황", "주홍", "노란", "노랑", "연두", "하늘", "자색",
+          "등색", "유백", "미황", "담황", "흑색", "검은", "파란", "붉은")
+_SHAPE_OK = re.compile(r"^[가-힣/\s]+$")
+MIN_SHAPE = 4
+
+
+def _is_shape(s: str) -> bool:
+    """성상 설명인가. 색 이름으로 시작하고 한글·슬래시·공백만으로 되어 있다."""
+    s = s.strip()
+    return (len(s) >= MIN_SHAPE and s.startswith(_COLOR)
+            and bool(_SHAPE_OK.match(s)))
+
 # 약효분류 라벨의 최소 길이. 4 로 하면 "헌터라제" 가 죽는다. 실재하는 품목이다.
 MIN_CLASS = 5
 
@@ -132,7 +158,8 @@ def clean(line: str) -> str | None:
     """
     if not line or not line.strip():
         return None
-    if _KILL.search(line) or _BULLET.match(line) or _is_class_label(line):
+    if (_KILL.search(line) or _BULLET.match(line)
+            or _is_class_label(line) or _is_shape(line)):
         return None
     s = core_text(line)
     if len(_KOR.findall(s)) < MIN_KOR:
