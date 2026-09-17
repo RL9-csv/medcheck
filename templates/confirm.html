@@ -28,9 +28,12 @@
     </p>
     {% endif %}
 
-    {% for item in env["items"] %}{% set slot = loop.index0 %}
+    {# 확실한 것 먼저, 물어볼 것은 접어서. 거르는 게 아니라 순서만 바꾼
+       것이라 목록에서 사라지는 항목은 없다. slot 은 서버가 박아 준다 —
+       여기서 loop.index0 을 쓰면 정렬 때문에 라디오 그룹이 어긋난다. #}
+    {% for item in env["items"] if item.status == "auto" %}{% set slot = item.slot %}
     <div class="py-2.5 border-t first:border-t-0">
-      {% if item.status == "auto" %}
+      {% if true %}
         <label class="flex items-start gap-2.5 cursor-pointer">
           <input type="checkbox" name="pick{{ env.index }}" value="{{ item.auto.item_seq }}" checked class="mt-1">
           <span>
@@ -38,7 +41,21 @@
             <span class="text-xs text-slate-400 ml-1.5">{{ item.auto.otc }}</span>
           </span>
         </label>
-      {% elif item.status == "suggest" %}
+      {% endif %}
+    </div>
+    {% endfor %}
+
+    {% if env.n_ask %}
+    <details class="mt-1 border-t pt-2"{% if not env.n_auto %} open{% endif %}>
+      <summary class="cursor-pointer text-sm text-slate-500 hover:text-slate-800 py-1.5">
+        확실하지 않은 {{ env.n_ask }}개 — 눌러서 확인하기
+      </summary>
+      <p class="text-xs text-slate-400 mt-1 mb-1">
+        약이 아닌 글자가 섞여 있을 수 있습니다. 드시는 약만 골라주세요.
+      </p>
+    {% for item in env["items"] if item.status != "auto" %}{% set slot = item.slot %}
+    <div class="py-2.5 border-t">
+      {% if item.status == "suggest" %}
         <div class="text-sm text-slate-500 mb-1.5">
           <span class="font-mono text-slate-700">{{ item.query }}</span> — 어떤 약인지 골라주세요
         </div>
@@ -63,6 +80,8 @@
       {% endif %}
     </div>
     {% endfor %}
+    </details>
+    {% endif %}
   </div>
   {% endfor %}
 

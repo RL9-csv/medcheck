@@ -151,8 +151,27 @@ def _envelope(index, label, lines, trace, drop_none=False):
             continue
         items.append({"query": line, "status": status,
                       "auto": med, "candidates": cands})
+
+    # 슬롯 번호를 여기서 박는다. 화면에서 loop.index0 을 쓰면 정렬하는 순간
+    # 라디오 그룹 이름이 어긋나 다른 줄의 선택을 덮어쓴다.
+    for n, it in enumerate(items):
+        it["slot"] = n
+
+    # 확실한 것을 위로 올린다. OCR 이 읽은 순서대로 두면 확정된 약과 잡음
+    # 후보가 섞여서 나온다. 영수증형은 스무 줄이 넘어 사용자가 자기 약을
+    # 찾으려면 잡음 사이를 훑어야 한다.
+    #
+    # 거르는 것이 아니라 순서만 바꾼다. 목록에서 사라지는 항목이 없으므로
+    # 정확도에 영향이 없다. 잡음 후보는 사람이 보고 안 고르면 그만이지만,
+    # 약이 안 보이면 사용자가 알 방법이 없다. 그래서 필터를 조이는 대신
+    # 순서를 바꾼다.
+    rank = {"auto": 0, "suggest": 1, "none": 2}
+    items.sort(key=lambda it: (rank.get(it["status"], 3),
+                               -(it["candidates"][0].confidence if it["candidates"] else 0)))
     return {"index": index, "label": label, "items": items,
-            "dropped": dropped, "read": read}
+            "dropped": dropped, "read": read,
+            "n_auto": sum(1 for i in items if i["status"] == "auto"),
+            "n_ask": sum(1 for i in items if i["status"] != "auto")}
 
 
 MAX_SIDE = 1280          # OCR 전에 긴 변을 이만큼으로 줄인다
