@@ -112,6 +112,18 @@ def _is_shape(s: str) -> bool:
 MIN_CLASS = 5
 
 
+# 분류를 가리키는 말끝. 약효분류 규칙("제"로 끝남)이 못 잡는 부류다.
+#   알러지질환약 / 피부질환용약 / 소화기증상약
+# "약"으로 끝나는 것을 통째로 거르면 실제 품목 17건이 죽는다(성광관장약,
+# 이명래고약, 알레르기진단용시약 등). 그래서 일반 규칙 대신 분류 문법에
+# 해당하는 말끝만 닫힌 목록으로 둔다. 카탈로그 65,995건과 괄호 앞 이름
+# 전체에서 죽는 품목 0건이다.
+#
+# 병명+"약"(고혈압약, 당뇨약)은 넣지 않았다. 지금도 none 으로 떨어지고,
+# 병명을 나열하기 시작하면 우리 사진에 맞추는 일이 된다.
+_CLASS_TAIL = re.compile(r"(질환용약|질환약|용약|증상약|증약)$")
+
+
 def _is_class_label(s: str) -> bool:
     """혈압강하제 / 항혈소판제 / 위장운동촉진제 같은 약효분류 라벨인가.
 
@@ -124,6 +136,8 @@ def _is_class_label(s: str) -> bool:
     짧은 이름까지 통과시켜서 죽는 품목명이 0건인 것을 확인했다.
     """
     s = s.strip()
+    if bool(_ONLY_KOR.match(s)) and _CLASS_TAIL.search(s):
+        return True
     return (bool(_ONLY_KOR.match(s)) and len(s) >= MIN_CLASS
             and s.endswith("제") and not _FORM_TOKEN.search(s))
 
